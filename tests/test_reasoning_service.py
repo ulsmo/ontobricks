@@ -443,7 +443,9 @@ class TestRunConstraintChecks:
         result = svc.run_constraint_checks()
         assert result.stats.get("skipped") is True
 
-    def test_non_ladybug_store_skipped(self):
+    def test_constraint_check_skipped_for_sql_backends(self):
+        """run_constraint_checks is currently a no-op until a Cypher-capable
+        backend is wired in; the SQL-based default skips with a reason."""
         ontology = {
             "base_uri": "http://ex.org#",
             "classes": [],
@@ -459,7 +461,7 @@ class TestRunConstraintChecks:
             "swrl_rules": [],
             "shacl_shapes": [],
         }
-        store = MagicMock()  # not LadybugBase
+        store = MagicMock()  # SQL-backed store
         svc = ReasoningService(
             _domain_session(ontology=ontology), triplestore_backend=store
         )

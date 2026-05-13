@@ -16,6 +16,7 @@ def _make_connect_mock(
     fetchone_value=None,
     description=None,
     fetchall_rows=None,
+    fetchmany_batches=None,
 ):
     """Build a mock chain for ``databricks.sql.connect`` context manager."""
     mock_cursor = MagicMock()
@@ -25,6 +26,9 @@ def _make_connect_mock(
         mock_cursor.description = description
     if fetchall_rows is not None:
         mock_cursor.fetchall.return_value = fetchall_rows
+    if fetchmany_batches is not None:
+        # Yield each batch, then an empty list to terminate the loop.
+        mock_cursor.fetchmany.side_effect = list(fetchmany_batches) + [[]]
 
     mock_conn = MagicMock()
     mock_conn.__enter__ = Mock(return_value=mock_conn)
@@ -159,6 +163,61 @@ class TestExecuteQuery:
             sw.execute_query("BAD SQL")
 
 
+class TestIterRows:
+    def test_raises_value_error_if_no_warehouse_id(self, monkeypatch):
+        monkeypatch.delenv("DATABRICKS_APP_PORT", raising=False)
+        monkeypatch.delenv("DATABRICKS_SQL_WAREHOUSE_ID", raising=False)
+        monkeypatch.delenv("DATABRICKS_SQL_WAREHOUSE_ID_DEFAULT", raising=False)
+        auth = DatabricksAuth(
+            host="https://h.databricks.com",
+            token="tok",
+            warehouse_id="",
+        )
+        sw = SQLWarehouse(auth)
+        with pytest.raises(ValidationError, match="SQL Warehouse ID"):
+            list(sw.iter_rows("SELECT 1"))
+
+    def test_rejects_non_positive_batch_size(self, monkeypatch):
+        monkeypatch.delenv("DATABRICKS_APP_PORT", raising=False)
+        auth = DatabricksAuth(
+            host="https://h.databricks.com",
+            token="tok",
+            warehouse_id="wh-1",
+        )
+        sw = SQLWarehouse(auth)
+        with pytest.raises(ValidationError, match="batch_size"):
+            list(sw.iter_rows("SELECT 1", batch_size=0))
+
+    @patch("databricks.sql.connect")
+    def test_streams_rows_in_batches(self, mock_connect, monkeypatch):
+        """``iter_rows`` must use ``fetchmany`` and never call ``fetchall``."""
+        monkeypatch.delenv("DATABRICKS_APP_PORT", raising=False)
+        mock_conn, mock_cursor = _make_connect_mock(
+            description=[("subject",), ("predicate",), ("object",)],
+            fetchmany_batches=[
+                [("s1", "p", "o1"), ("s2", "p", "o2")],
+                [("s3", "p", "o3")],
+            ],
+        )
+        mock_connect.return_value = mock_conn
+
+        auth = DatabricksAuth(
+            host="https://h.databricks.com",
+            token="tok",
+            warehouse_id="wh-1",
+        )
+        sw = SQLWarehouse(auth)
+        rows = list(sw.iter_rows("SELECT subject, predicate, object FROM v", batch_size=2))
+        assert rows == [
+            {"subject": "s1", "predicate": "p", "object": "o1"},
+            {"subject": "s2", "predicate": "p", "object": "o2"},
+            {"subject": "s3", "predicate": "p", "object": "o3"},
+        ]
+        mock_cursor.fetchall.assert_not_called()
+        # 2 fetchmany calls returning data + 1 returning [] to terminate.
+        assert mock_cursor.fetchmany.call_count == 3
+
+
 class TestExecuteStatement:
     def test_raises_value_error_if_no_warehouse_id(self, monkeypatch):
         monkeypatch.delenv("DATABRICKS_APP_PORT", raising=False)
@@ -187,6 +246,7 @@ class TestExecuteStatement:
         sw = SQLWarehouse(auth)
         assert sw.execute_statement("CREATE TABLE x (i INT)") is True
         mock_cursor.execute.assert_called_once()
+        mock_conn.commit.assert_called_once()
 
     @patch("databricks.sql.connect", side_effect=OSError("network down"))
     def test_raises_on_error(self, mock_connect, monkeypatch):

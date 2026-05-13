@@ -2,8 +2,9 @@
 ==========================================================
 
 The triple store package covers Unity Catalog / Delta materialization and
-related services. **Graph database** engines (LadybugDB, Cypher, volume sync)
-live in ``back.core.graphdb``; see :doc:`app.core.graphdb`.
+related services. **Graph database** engines (Lakebase Postgres today,
+plus the pluggable abstraction for future engines) live in
+``back.core.graphdb``; see :doc:`app.core.graphdb`.
 
 Constants
 ---------
@@ -25,14 +26,6 @@ Factory
 -------
 
 .. automodule:: back.core.triplestore.TripleStoreFactory
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Incremental build
------------------
-
-.. automodule:: back.core.triplestore.IncrementalBuildService
    :members:
    :undoc-members:
    :show-inheritance:

@@ -37,6 +37,22 @@ async function loadSyncInfo() {
         console.log('[Sync] Consolidated triplestore status -> hasData:', tripleStoreHasData);
         renderTripleStoreStatus(tsStatus);
 
+        // Guard against cache-staleness inconsistency: the shared cache timestamp
+        // can make an old dt_existence entry (local_lbug_exists=true) appear fresh
+        // even after a new status write sets has_data=false.  When the two signals
+        // disagree for Lakebase (both ultimately check the same Postgres table),
+        // trust the triplestore_status — it is a more targeted, recent check.
+        if (!tripleStoreHasData && payload.dt_existence) {
+            var eng = (payload.dt_existence.graph_engine || '').toLowerCase();
+            if (eng === 'lakebase' && payload.dt_existence.local_lbug_exists) {
+                console.warn(
+                    '[Sync] dt_existence says Loaded but triplestore_status says no data ' +
+                    '(cache staleness). Overriding local_lbug_exists to false.'
+                );
+                payload.dt_existence.local_lbug_exists = false;
+            }
+        }
+
         // --- Rebuild warning (timestamps and/or session change flags from readiness) ---
         _updateSyncRebuildWarningFromPayload(payload);
 
@@ -72,28 +88,18 @@ function _updateSyncRebuildWarningFromPayload(payload) {
  * Apply readiness data obtained from the consolidated endpoint.
  */
 function _applyReadiness(data) {
-    var ontologyReady = !!data.ontology_valid;
     var assignmentReady = !!data.mapping_valid;
     var ontologyChanged = !!data.ontology_changed;
     var assignmentChanged = !!data.assignment_changed;
-    var ontologyStats = data.ontology_stats || {};
-    var assignmentStats = data.mapping_stats || {};
 
-    var entities = ontologyStats.classes || 0;
-    var attributes = ontologyStats.attributes || 0;
-    var relationships = ontologyStats.object_properties || ontologyStats.properties || 0;
-    var mappedEntities = assignmentStats.entities || 0;
-    var mappedRels = assignmentStats.relationships || 0;
+    syncIsReady = assignmentReady;
 
-    _setSyncTile('syncTileEntities', entities, entities > 0 ? 'success' : 'muted');
-    _setSyncTile('syncTileAttributes', attributes, attributes > 0 ? 'success' : 'muted');
-    _setSyncTile('syncTileRelationships', relationships, relationships > 0 ? 'success' : 'muted');
-    _setSyncTile('syncTileMappedEntities', mappedEntities,
-        assignmentReady ? 'success' : mappedEntities > 0 ? 'warning' : 'danger');
-    _setSyncTile('syncTileMappedRels', mappedRels,
-        assignmentReady ? 'success' : mappedRels > 0 ? 'warning' : 'danger');
-
-    syncIsReady = ontologyReady && assignmentReady;
+    var badgeEl = document.getElementById('syncMappingReadyBadge');
+    if (badgeEl) {
+        badgeEl.innerHTML = assignmentReady
+            ? '<span class="badge bg-success bg-opacity-10 text-success border border-success"><i class="bi bi-check-circle-fill me-1"></i>Ready</span>'
+            : '<span class="badge bg-danger text-white border border-danger"><i class="bi bi-x-circle-fill me-1"></i>Not ready</span>';
+    }
 
     var alertEl = document.getElementById('syncNotReadyAlert');
     if (alertEl) {
@@ -106,9 +112,7 @@ function _applyReadiness(data) {
     if (syncBtn) syncBtn.disabled = !syncIsReady;
     if (loadBtn) loadBtn.disabled = !syncIsReady;
 
-    var loadingEl = document.getElementById('syncReadinessLoading');
     var contentEl = document.getElementById('syncReadinessContent');
-    if (loadingEl) loadingEl.classList.add('d-none');
     if (contentEl) contentEl.classList.remove('d-none');
 
     var staleRow = document.getElementById('syncReadinessStaleIndicators');
@@ -128,18 +132,88 @@ function _applyReadiness(data) {
     }
 }
 
-function _setSyncTile(tileId, value, state) {
-    var tile = document.getElementById(tileId);
-    if (!tile) return;
-    tile.className = 'ob-kpi-tile' + (state ? ' tile-' + state : '');
-    var valEl = document.getElementById(tileId + 'Value');
-    if (valEl) valEl.textContent = value;
-}
-
 /**
  * Apply DT-existence data obtained from the consolidated endpoint.
  * Mirrors _loadDtExistence() rendering without the separate fetch.
  */
+/**
+ * Build page: labels and options depend on global Graph DB engine.
+ * Currently only Lakebase is supported; the function keeps a generic
+ * shape so future engines can be added without touching call sites.
+ */
+function _applyBuildGraphEngineUi(dtExist) {
+    var dt = dtExist || {};
+    var cfg = window.__TRIPLESTORE_CONFIG || {};
+    var eng = dt.graph_engine || cfg.graph_engine || 'lakebase';
+    cfg.graph_engine = eng;
+    window.__TRIPLESTORE_CONFIG = cfg;
+
+    // (footnote moved into card)
+    var fnLk = document.getElementById('graphEngineFootnoteLakebase');
+    if (fnLk) fnLk.classList.remove('d-none');
+
+    var title = document.getElementById('dtGraphBackendTitle');
+    if (title) {
+        title.textContent = eng === 'lakebase' ? 'Graph DB (Lakebase)' : 'Graph DB Digital Twin';
+    }
+    var sub = document.getElementById('dtGraphStorageSubtitle');
+    var primaryRow = document.getElementById('dtGraphPrimaryRow');
+    if (sub) sub.classList.add('d-none');
+    if (primaryRow) primaryRow.classList.add('d-none');
+    var regRow = document.getElementById('dtRegistryArchiveRow');
+    if (regRow) regRow.classList.add('d-none');
+    var lkDetails = document.getElementById('dtLakebaseDetails');
+    if (lkDetails) lkDetails.classList.toggle('d-none', eng !== 'lakebase');
+
+    if (eng === 'lakebase') {
+        var lkDb  = document.getElementById('dtLakebaseDatabase');
+        var lkSch = document.getElementById('dtLakebaseSchema');
+        var lkTbl = document.getElementById('dtLakebaseTable');
+        var lkUcRow = document.getElementById('dtLakebaseSyncedUcRow');
+        var lkUc    = document.getElementById('dtLakebaseSyncedUc');
+        if (lkDb)  lkDb.textContent  = dt.lakebase_database || '—';
+        if (lkSch) lkSch.textContent = dt.lakebase_schema   || '—';
+        if (lkTbl) lkTbl.textContent = dt.lakebase_table    || '—';
+        var hasUc = !!(dt.lakebase_synced_uc);
+        // Always show the UC sync row for managed_synced; hide only when truly absent
+        if (lkUcRow) lkUcRow.classList.toggle('d-none', !hasUc);
+        if (lkUc) lkUc.textContent = dt.lakebase_synced_uc || '—';
+
+        // existence badges for table and UC sync
+        var tblExistsEl = document.getElementById('dtLakebaseTableExists');
+        if (tblExistsEl) {
+            if (dt.lakebase_table_exists === true)
+                tblExistsEl.innerHTML = '<span class="badge bg-success bg-opacity-10 text-success border border-success" style="font-size:.65rem;"><i class="bi bi-check-circle-fill me-1"></i>Exists</span>';
+            else if (dt.lakebase_table_exists === false)
+                tblExistsEl.innerHTML = '<span class="badge bg-secondary bg-opacity-10 text-secondary border" style="font-size:.65rem;"><i class="bi bi-dash-circle me-1"></i>Not found</span>';
+            else
+                tblExistsEl.innerHTML = '';
+        }
+        var ucExistsEl = document.getElementById('dtLakebaseSyncedUcExists');
+        if (ucExistsEl && hasUc) {
+            ucExistsEl.innerHTML = '<span class="badge bg-info bg-opacity-10 text-info border border-info" style="font-size:.65rem;"><i class="bi bi-check-circle-fill me-1"></i>Registered</span>';
+        } else if (ucExistsEl) {
+            ucExistsEl.innerHTML = '';
+        }
+
+        // in-card build note (replaces footnote below the card)
+        var buildNote = document.getElementById('dtLakebaseBuildNote');
+        if (buildNote) {
+            var fn2Db  = document.getElementById('fnLkDatabase2');
+            var fn2Sch = document.getElementById('fnLkSchema2');
+            var fn2Tbl = document.getElementById('fnLkTable2');
+            var fn2Uc  = document.getElementById('fnLkSyncedUc2');
+            var fn2Sync = document.getElementById('fnLkSyncNote');
+            if (fn2Db)  fn2Db.textContent  = dt.lakebase_database || '…';
+            if (fn2Sch) fn2Sch.textContent = dt.lakebase_schema   || '…';
+            if (fn2Tbl) fn2Tbl.textContent = dt.lakebase_table    || '…';
+            if (fn2Sync) fn2Sync.classList.toggle('d-none', !hasUc);
+            if (fn2Uc && hasUc) fn2Uc.textContent = dt.lakebase_synced_uc;
+            buildNote.style.display = '';
+        }
+    }
+}
+
 function _applyDtExistence(data) {
     function _badge(flag, okText, failText, unknownText) {
         if (flag === true)
@@ -184,8 +258,12 @@ function _applyDtExistence(data) {
 
     var reloadBtn = document.getElementById('dtReloadFromRegistry');
     if (reloadBtn) {
-        if (data.registry_lbug_exists === true) reloadBtn.classList.remove('d-none');
-        else reloadBtn.classList.add('d-none');
+        var skipReload = data.registry_archive_applicable === false;
+        if (!skipReload && data.registry_lbug_exists === true) {
+            reloadBtn.classList.remove('d-none');
+        } else {
+            reloadBtn.classList.add('d-none');
+        }
     }
 
     var graphCard = document.getElementById('dtGraphCard');
@@ -196,23 +274,6 @@ function _applyDtExistence(data) {
             graphCard.className = 'border rounded p-3 h-100 border-danger';
         else
             graphCard.className = 'border rounded p-3 h-100';
-    }
-
-    // Snapshot info (inside Triple-Store card)
-    var snapshotArea = document.getElementById('dtSnapshotArea');
-    var snapshotNameEl = document.getElementById('dtSnapshotName');
-    var snapshotBadgeEl = document.getElementById('dtExistSnapshot');
-    var dropBtn = document.getElementById('dtDropSnapshot');
-    if (snapshotArea && data.snapshot_table) {
-        snapshotArea.classList.remove('d-none');
-        if (snapshotNameEl) snapshotNameEl.textContent = data.snapshot_table;
-        if (snapshotBadgeEl) snapshotBadgeEl.innerHTML = _badge(data.snapshot_exists, 'Exists', 'Not created', 'N/A');
-        if (dropBtn) {
-            if (data.snapshot_exists === true) dropBtn.classList.remove('d-none');
-            else dropBtn.classList.add('d-none');
-        }
-    } else if (snapshotArea) {
-        snapshotArea.classList.add('d-none');
     }
 
     // Global info: last update & last built
@@ -267,16 +328,20 @@ async function initSyncSection() {
     if (overlay) overlay.classList.remove('d-none');
 
     try {
+        _applyBuildGraphEngineUi(window.__TRIPLESTORE_CONFIG || {});
+
         var payload = await loadSyncInfo();
 
         var cfg = window.__TRIPLESTORE_CONFIG || {};
 
         const di = payload && (payload.domain_info || payload.project_info);
         if (di && di.success && di.info) {
+            const prevEng = cfg.graph_engine || 'lakebase';
             cfg = {
                 view_table: di.info.view_table || '',
                 graph_name: di.info.graph_name || '',
-                cache: {}
+                graph_engine: prevEng,
+                cache: {},
             };
             window.__TRIPLESTORE_CONFIG = cfg;
         }
@@ -298,17 +363,13 @@ async function initSyncSection() {
         if (columnsArea) columnsArea.classList.remove('d-none');
 
         if (payload && payload.dt_existence) {
+            _applyBuildGraphEngineUi(payload.dt_existence);
             _applyDtExistence(payload.dt_existence);
         }
 
         var targetLabel = document.getElementById('syncTargetLabel');
         if (targetLabel) {
             targetLabel.innerHTML = '<i class="bi bi-lightning-charge me-1"></i>Digital Twin';
-        }
-
-        var ladybugSyncInfo = document.getElementById('ladybugSyncInfo');
-        if (ladybugSyncInfo) {
-            ladybugSyncInfo.classList.remove('d-none');
         }
 
         if (typeof refreshNavbarIndicators === 'function') refreshNavbarIndicators();
@@ -592,11 +653,6 @@ async function startTripleStoreSync() {
         return;
     }
 
-    var buildModeEl = document.querySelector('input[name="buildMode"]:checked');
-    var buildMode = buildModeEl ? buildModeEl.value : 'incremental';
-    var archiveEl = document.getElementById('syncArchiveToRegistry');
-    var archiveToRegistry = archiveEl ? archiveEl.checked : true;
-
     // Disable button and menus
     const btn = document.getElementById('syncStartBtn');
     if (btn) btn.disabled = true;
@@ -615,10 +671,7 @@ async function startTripleStoreSync() {
         const response = await fetch('/dtwin/sync/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                build_mode: buildMode,
-                archive_to_registry: archiveToRegistry
-            }),
+            body: JSON.stringify({}),
             credentials: 'same-origin'
         });
 
@@ -904,17 +957,6 @@ function _getStepConfig(status) {
  * ``started_at`` and ``completed_at`` are therefore the same tick — show
  * an honest label instead of "0ms".
  */
-function _isArchiveBackgroundStep(step, task) {
-    return !!(
-        step &&
-        step.name === 'archive' &&
-        step.status === 'completed' &&
-        task &&
-        task.result &&
-        task.result.archive_background
-    );
-}
-
 /**
  * Render the right-hand time column. Running steps get a live timer so
  * users see the seconds tick during the slower poll cadence; finished
@@ -922,9 +964,6 @@ function _isArchiveBackgroundStep(step, task) {
  */
 function _renderStepTime(step, task) {
     if (step.status === 'completed' || step.status === 'failed' || step.status === 'skipped') {
-        if (_isArchiveBackgroundStep(step, task)) {
-            return '<span class="text-muted small" title="The registry file copy continues in the background">Continues after build</span>';
-        }
         const start = step.started_at;
         const end = step.completed_at || step.started_at;
         if (!start) return '<span class="text-muted">—</span>';
@@ -1043,8 +1082,6 @@ function _formatBuildLogAsText(task) {
         lines.push('Result');
         lines.push(sep);
         const r = task.result;
-        if (r.build_mode != null)       lines.push('Build mode      : ' + r.build_mode);
-        if (r.skipped_reason)           lines.push('Skipped reason  : ' + r.skipped_reason);
         if (r.triple_count != null)     lines.push('Triples         : ' + r.triple_count);
         if (r.diff && typeof r.diff === 'object') {
             lines.push('Diff            : +' + (r.diff.added || 0) + ' / -' + (r.diff.removed || 0));
@@ -1052,12 +1089,6 @@ function _formatBuildLogAsText(task) {
         if (r.view_table)               lines.push('View table      : ' + r.view_table);
         if (r.graph_name)               lines.push('Graph name      : ' + r.graph_name);
         if (r.duration_seconds != null) lines.push('Duration (s)    : ' + r.duration_seconds);
-        if (r.archive_to_registry === false) {
-            lines.push('Registry archive: skipped (checkbox off)');
-        } else if (r.archive_background) {
-            const archiveTask = r.archive_task_id ? `task ${r.archive_task_id}` : 'background task';
-            lines.push(`Registry archive: started in background (${archiveTask}; upload may still be running)`);
-        }
         lines.push('');
     }
 
@@ -1079,52 +1110,18 @@ function showSyncResult(result) {
     const viewTable = result.view_table || '';
     const graphName = result.graph_name || '';
     const duration = result.duration_seconds ? result.duration_seconds.toFixed(1) : '?';
-    const buildMode = result.build_mode || 'full';
-    const diff = result.diff || null;
-    const skippedReason = result.skipped_reason || null;
-
-    var modeLabel = 'Full rebuild';
-    var modeIcon = 'bi-arrow-repeat';
-    var modeColor = 'text-primary';
-    if (buildMode === 'incremental') {
-        modeLabel = 'Incremental';
-        modeIcon = 'bi-lightning-charge';
-        modeColor = 'text-success';
-    } else if (buildMode === 'skipped') {
-        modeLabel = 'Skipped';
-        modeIcon = 'bi-skip-forward';
-        modeColor = 'text-muted';
-    }
-
-    var mainMetric = tripleCount.toLocaleString();
-    var mainLabel = 'Total triples';
-    if (diff) {
-        mainMetric = '+' + (diff.added || 0).toLocaleString() + ' / -' + (diff.removed || 0).toLocaleString();
-        mainLabel = 'Changes applied';
-    }
-    if (skippedReason) {
-        mainMetric = '<i class="bi bi-skip-forward"></i>';
-        mainLabel = skippedReason;
-    }
-
     content.innerHTML =
         '<div class="row g-3">' +
-        '  <div class="col-md-4">' +
+        '  <div class="col-md-6">' +
         '    <div class="border rounded p-2 text-center">' +
-        '      <div class="fs-4 fw-bold text-primary">' + mainMetric + '</div>' +
-        '      <small class="text-muted">' + mainLabel + '</small>' +
+        '      <div class="fs-4 fw-bold text-primary">' + tripleCount.toLocaleString() + '</div>' +
+        '      <small class="text-muted">Total triples</small>' +
         '    </div>' +
         '  </div>' +
-        '  <div class="col-md-4">' +
+        '  <div class="col-md-6">' +
         '    <div class="border rounded p-2 text-center">' +
         '      <div class="fs-6 fw-bold text-secondary">' + duration + 's</div>' +
         '      <small class="text-muted">Duration</small>' +
-        '    </div>' +
-        '  </div>' +
-        '  <div class="col-md-4">' +
-        '    <div class="border rounded p-2 text-center">' +
-        '      <div class="fs-6 fw-bold ' + modeColor + '"><i class="bi ' + modeIcon + ' me-1"></i>' + modeLabel + '</div>' +
-        '      <small class="text-muted">Build mode</small>' +
         '    </div>' +
         '  </div>' +
         '</div>' +
@@ -1456,6 +1453,7 @@ async function _loadDtExistence() {
     try {
         var resp = await fetch('/dtwin/sync/dt-existence', { credentials: 'same-origin' });
         var data = await resp.json();
+        _applyBuildGraphEngineUi(data);
         _applyDtExistence(data);
     } catch (e) {
         console.warn('[Sync] Could not load DT existence flags', e);
@@ -1493,37 +1491,6 @@ async function reloadGraphFromRegistry() {
     }
 }
 
-/**
- * Drop the incremental snapshot table to force a full rebuild on next build.
- */
-async function dropSnapshotTable() {
-    var btn = document.getElementById('dtDropSnapshot');
-    if (!btn) return;
-    var origHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Dropping...';
-
-    try {
-        var resp = await fetch('/dtwin/sync/drop-snapshot', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin'
-        });
-        var data = await resp.json();
-        if (data.success) {
-            showNotification('Snapshot dropped — next build will be a full rebuild', 'success');
-            _loadDtExistence();
-        } else {
-            showNotification('Drop failed: ' + (data.message || 'Unknown error'), 'error');
-        }
-    } catch (e) {
-        showNotification('Drop failed: ' + e.message, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = origHtml;
-    }
-}
-
 // Initialize on page load with a single consolidated API call
 document.addEventListener('DOMContentLoaded', async function() {
     // Wire the standalone Insight section refresh button
@@ -1543,7 +1510,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             var act = btn.getAttribute('data-sync-action');
             if (act === 'refresh-triple-store') checkTripleStoreStatus(true);
             else if (act === 'start-triple-store-sync') startTripleStoreSync();
-            else if (act === 'drop-snapshot-table') dropSnapshotTable();
             else if (act === 'reload-graph-from-registry') reloadGraphFromRegistry();
         });
     }

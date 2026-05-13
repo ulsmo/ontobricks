@@ -296,9 +296,9 @@ databricks apps deploy --app-name ontobricks
 
 ### Summary
 
-OntoBricks is a **Knowledge Graph Builder for Databricks** that brings **graph database capabilities and formal reasoning** to the Lakehouse — without requiring separate graph infrastructure. It transforms relational tables stored in Unity Catalog into a structured knowledge graph by leveraging semantic web standards (OWL, R2RML, RDF), embedded graph technology (LadybugDB with Cypher), OWL 2 RL reasoning, and LLM-powered automation.
+OntoBricks is a **Knowledge Graph Builder for Databricks** that brings **graph database capabilities and formal reasoning** to the Lakehouse — without requiring separate graph infrastructure. It transforms relational tables stored in Unity Catalog into a structured knowledge graph by leveraging semantic web standards (OWL, R2RML, RDF), a Lakebase Postgres graph engine, OWL 2 RL reasoning, and LLM-powered automation.
 
-Users can design ontologies visually or import industry standards (FIBO for finance, CDISC for clinical data, IOF for manufacturing), map ontology entities to Databricks tables, materialize the result into a Delta or LadybugDB triple store, run **formal reasoning** (OWL 2 RL deductive closure, SWRL rules, transitive/symmetric inference), and explore the knowledge graph through interactive visualization. The entire pipeline — from raw tables to a reasoned, queryable knowledge graph — can be completed in as few as four clicks thanks to LLM-driven ontology generation and automatic data mapping.
+Users can design ontologies visually or import industry standards (FIBO for finance, CDISC for clinical data, IOF for manufacturing), map ontology entities to Databricks tables, materialize the result into a Delta-backed triple store mirrored on Lakebase Postgres, run **formal reasoning** (OWL 2 RL deductive closure, SWRL rules, transitive/symmetric inference), and explore the knowledge graph through interactive visualization. The entire pipeline — from raw tables to a reasoned, queryable knowledge graph — can be completed in as few as four clicks thanks to LLM-driven ontology generation and automatic data mapping.
 
 OntoBricks runs as a **Databricks App**, making it natively integrated with the Databricks platform: Unity Catalog for storage and metadata, SQL Warehouses for query execution, and Model Serving endpoints for LLM features.
 
@@ -333,17 +333,17 @@ OntoBricks provides an end-to-end, web-based solution that runs directly on Data
 - **LLM-powered Auto-Map**: The LLM generates SQL queries and column mappings for every entity and relationship automatically, using domain metadata as context.
 - **R2RML generation**: W3C-compliant R2RML mappings are generated behind the scenes — users never need to write mapping rules manually.
 
-#### Dual Triple Store Backends
+#### Triple Store + Graph DB Layers
 
-- **Delta (SQL Warehouse)**: Materialize triples into a governed Delta table `(subject, predicate, object)` with Liquid Clustering, full Unity Catalog lineage, and SQL-based graph reasoning (recursive CTEs for transitive closure, anti-joins for symmetric expansion).
-- **LadybugDB (Embedded Graph)**: An embedded Cypher-native graph database (`real_ladybug`) that generates **typed node and relationship tables** from the OWL ontology — each class becomes a Cypher `NODE TABLE`, each object property a `REL TABLE` — enabling native graph traversal, shortest-path algorithms, and variable-length path queries without a separate graph database.
+- **Delta view (SQL Warehouse)**: Materialize triples into a governed Delta view `(subject, predicate, object)` with Liquid Clustering, full Unity Catalog lineage, and SQL-based graph reasoning (recursive CTEs for transitive closure, anti-joins for symmetric expansion).
+- **Lakebase Postgres (Graph DB engine)**: A flat triple table on the App-bound Lakebase Postgres instance, populated either by `app_managed` `COPY FROM STDIN` streaming or by `managed_synced` Lakeflow synced tables. The same SQL primitives used on Delta run on Lakebase, with sub-second latency from the FastAPI process. The Graph DB layer is pluggable behind `GraphDBBackend` and `GraphDBFactory` — capability flags (`supports_cypher`, `is_cypher_backend`, `query_dialect`) reserve a slot for plugging in a future Cypher / Gremlin engine.
 - **Quality checks**: Validate the triple store against ontology constraints — cardinality, value constraints, functional/symmetric properties, orphan detection, and more.
 - **SHACL Data Quality**: Define W3C SHACL shapes across six quality categories (completeness, cardinality, uniqueness, consistency, conformance, structural) — shapes are compiled to SQL for execution against the triple store or validated in-memory via PySHACL.
 
 #### Reasoning & Inference
 
 - **OWL 2 RL Reasoner**: Forward-chaining deductive closure on the ontology using the `owlrl` library — infers subclass hierarchies, property entailments, domain/range typing, and class axioms.
-- **SWRL Rule Engine**: User-defined Horn-clause rules with a **graphical D3-based editor** — compiled to SQL (Delta) or Cypher (LadybugDB) for violation detection and triple materialization.
+- **SWRL Rule Engine**: User-defined Horn-clause rules with a **graphical D3-based editor** — compiled to SQL (Spark SQL on Delta, Postgres SQL on Lakebase) for violation detection and triple materialization.
 - **Graph Reasoning**: Automatic transitive closure and symmetric expansion based on OWL property characteristics.
 - **Constraint Validation**: Formal checking of cardinality, functional/inverse-functional properties, value constraints, and global rules (no orphans, require labels).
 
@@ -400,7 +400,7 @@ A **production-ready Databricks App** (open-source, MIT license) that:
 | **Data understanding**       | Domain experts can visually model and explore entity relationships without writing SQL                                                                                                     |
 | **Knowledge graph adoption** | Removes the infrastructure barrier — no separate graph database needed; triples live in Delta or an embedded graph engine                                                                  |
 | **Formal reasoning**         | OWL 2 RL deductive closure and SWRL rules bring inference capabilities to the Lakehouse — discovering implicit relationships, enforcing constraints, and enriching data with derived facts |
-| **Graph capabilities**       | Embedded Cypher-native graph DB (LadybugDB) provides typed schema, traversal, shortest path, and variable-length path queries without deploying Neo4j or Neptune                           |
+| **Graph capabilities**       | Lakebase Postgres flat-store graph engine (with a pluggable `GraphDBBackend` for future Cypher / Gremlin engines) provides traversal, shortest path, transitive closure, and BFS without deploying Neo4j or Neptune                           |
 | **Industry compliance**      | FIBO, CDISC, and IOF ontologies become accessible directly from the Databricks platform                                                                                                    |
 | **Time to value**            | LLM automation reduces the manual effort from weeks of custom development to minutes of guided interaction                                                                                 |
 | **Reusability**              | Saved domains (ontology + mappings) can be versioned, shared, and applied to new datasets                                                                                                 |
@@ -424,8 +424,8 @@ A **production-ready Databricks App** (open-source, MIT license) that:
 | Layer      | Technology                                                                                |
 | ---------- | ----------------------------------------------------------------------------------------- |
 | Backend    | Python 3.10+, FastAPI, RDFLib, Databricks SDK                                             |
-| Reasoning  | owlrl 7.0+ (OWL 2 RL forward chaining), PySHACL 0.26+ (SHACL validation), custom SWRL engine (SQL + Cypher translators) |
-| Graph DB   | LadybugDB / real_ladybug (embedded Cypher graph database), typed node/rel schema from OWL |
+| Reasoning  | owlrl 7.0+ (OWL 2 RL forward chaining), PySHACL 0.26+ (SHACL validation), custom SWRL engine (SQL translator) |
+| Graph DB   | Lakebase Postgres flat triple store (`psycopg`, `COPY FROM STDIN`, optional Lakeflow synced tables); pluggable behind `GraphDBBackend` |
 | Graph Analysis | NetworkX 3.0+ (community detection: Louvain, Label Propagation, Greedy Modularity)    |
 | Frontend   | Bootstrap 5, Sigma.js, Graphology (+ communities-louvain), D3.js, OntoViz (custom), Vanilla JS |
 | Data       | Databricks SQL Connector, Unity Catalog, Delta Lake                                       |
@@ -440,8 +440,8 @@ A **production-ready Databricks App** (open-source, MIT license) that:
 - Tested with CRM, IoT, energy, and healthcare ontologies
 - Industry-standard imports operational (FIBO, CDISC, IOF)
 - LLM-powered wizard and auto-map working with Databricks Model Serving endpoints
-- **Reasoning engine operational**: OWL 2 RL deductive closure, SWRL rule engine (SQL + Cypher) with graphical D3 editor, graph reasoning (transitive closure, symmetric expansion), constraint validation, and SHACL data quality shapes (PySHACL + SQL compilation)
-- **Dual triple store backends**: Delta (SQL Warehouse) and LadybugDB (embedded Cypher graph DB) with typed schema generation from OWL
+- **Reasoning engine operational**: OWL 2 RL deductive closure, SWRL rule engine (SQL translator) with graphical D3 editor, graph reasoning (transitive closure, symmetric expansion), constraint validation, and SHACL data quality shapes (PySHACL + SQL compilation)
+- **Triple store + Graph DB layers**: Delta view (Unity Catalog) + Lakebase Postgres flat store, pluggable behind `GraphDBFactory`
 - MCP server deployed and operational for Databricks Playground
 - **Entity Groups**: OWL-compliant class grouping via `owl:equivalentClass` + `owl:unionOf`, with expand/collapse super-nodes in the Knowledge Graph visualization
 - **Data Cluster Detection**: Client-side Louvain (Graphology) and server-side community detection (NetworkX: Louvain, Label Propagation, Greedy Modularity) with color-by-cluster, resolution control, and cluster collapse/expand super-nodes

@@ -7,9 +7,8 @@ the active :class:`back.objects.registry.store.RegistryStore`:
 - Volume backend → ``.global_config.json`` on the UC Volume.
 - Lakebase backend → ``global_config`` row on Postgres.
 
-Admins (CAN MANAGE) control **warehouse_id** (SQL warehouse for UC),
-**default_base_uri**, **default_emoji**, the registry ``backend``, and
-the Lakebase ``schema`` name.
+Includes **graph_engine** / **graph_engine_config** with warehouse_id,
+default_base_uri, registry ``backend``, Lakebase ``schema`` name, etc.
 
 In local (non-App) mode the same persistence applies when a registry
 exists; env vars and fallbacks cover bootstrap and unconfigured
@@ -46,12 +45,19 @@ class GlobalConfigService:
 
     @staticmethod
     def _store_for(host: str, token: str, registry_cfg: Dict[str, str]):
-        """Build the right :class:`RegistryStore` for *registry_cfg*."""
+        """Build the Lakebase :class:`RegistryStore` for *registry_cfg*.
+
+        ``host``/``token`` are kept on the signature for backwards
+        compatibility with the many call sites that thread them through;
+        the Lakebase store sources its credentials from the
+        ``PG*`` env vars + Lakebase JWT, so they are ignored here.
+        """
         from back.objects.registry import RegistryCfg
         from back.objects.registry.store import RegistryFactory
 
+        del host, token
         cfg = RegistryCfg.from_dict(registry_cfg)
-        return RegistryFactory.from_cfg(cfg, host=host, token=token)
+        return RegistryFactory.from_cfg(cfg)
 
     # ------------------------------------------------------------------
     # Read
@@ -81,11 +87,6 @@ class GlobalConfigService:
             store = self._store_for(host, token, registry_cfg)
             data = store.load_global_config()
             if data:
-                if "schedule_history" in data:
-                    del data["schedule_history"]
-                    logger.info("Stripped legacy schedule_history from global config")
-                for _sched in (data.get("schedules") or {}).values():
-                    _sched.pop("registry_cfg", None)
                 self._cache = data
                 self._cache_ts = now
                 if "registry_cache_ttl" in data:
@@ -192,10 +193,7 @@ class GlobalConfigService:
 
         data = self.load(host, token, registry_cfg, force=True)
         data["version"] = data.get("version", 1)
-        data.pop("schedule_history", None)
         data.update(updates)
-        for _sched in (data.get("schedules") or {}).values():
-            _sched.pop("registry_cfg", None)
 
         try:
             store = self._store_for(host, token, registry_cfg)
@@ -265,14 +263,20 @@ class GlobalConfigService:
         """Persist the navbar logo as a ``data:`` URL (empty string clears it)."""
         return self._save(host, token, registry_cfg, {"navbar_logo": data_url or ""})
 
-    ALLOWED_GRAPH_ENGINES = ("ladybug",)
+    ALLOWED_GRAPH_ENGINES = ("lakebase",)
 
     def get_graph_engine(
         self, host: str, token: str, registry_cfg: Dict[str, str]
     ) -> str:
-        """Return the globally configured graph DB engine name."""
-        val = self.get(host, token, registry_cfg, "graph_engine", "ladybug")
-        return val if val in self.ALLOWED_GRAPH_ENGINES else "ladybug"
+        """Return the globally configured graph DB engine name.
+
+        Currently always resolves to ``"lakebase"``.  Extra engines plug
+        in by adding their key to :data:`ALLOWED_GRAPH_ENGINES` and
+        registering a backend class under
+        :class:`back.core.graphdb.GraphDBFactory`.
+        """
+        val = self.get(host, token, registry_cfg, "graph_engine", "lakebase")
+        return val if val in self.ALLOWED_GRAPH_ENGINES else "lakebase"
 
     def set_graph_engine(
         self,
@@ -308,6 +312,11 @@ class GlobalConfigService:
         """Persist the engine-specific configuration dict."""
         if not isinstance(config, dict):
             return False, "graph_engine_config must be a JSON object"
+        from back.core.graphdb.lakebase.LakebaseBase import validate_engine_config_keys
+
+        ok_keys, msg_keys = validate_engine_config_keys(config)
+        if not ok_keys:
+            return False, msg_keys
         return self._save(host, token, registry_cfg, {"graph_engine_config": config})
 
     def get_registry_cache_ttl(
@@ -347,7 +356,7 @@ class GlobalConfigService:
             "navbar_logo": "",
             "use_cloud_fetch": True,
             "registry_cache_ttl": 300,
-            "graph_engine": "ladybug",
+            "graph_engine": "lakebase",
             "graph_engine_config": {},
         }
 

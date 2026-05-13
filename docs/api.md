@@ -1917,7 +1917,7 @@ POST /dtwin/auto-assign-icons
 
 ### Data Quality Execution Endpoints
 
-Execute SHACL data quality checks against the triple store (Delta or LadybugDB).
+Execute SHACL data quality checks against the triple store (Delta view or the active Graph DB engine — Lakebase Postgres).
 
 #### Execute Quality Checks (Synchronous)
 
@@ -1957,8 +1957,8 @@ POST /dtwin/dataquality/execute
 ```
 
 **Backend Options:**
-- `delta` — Execute checks as SQL against the Delta triple store table
-- `graph` — Execute checks in-memory against the LadybugDB graph
+- `delta` — Execute checks as Spark SQL against the Delta triple store view
+- `graph` — Execute checks via the configured Graph DB engine (currently Lakebase Postgres)
 
 #### Start Quality Checks (Async)
 

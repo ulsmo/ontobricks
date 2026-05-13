@@ -362,16 +362,23 @@ class HomeService:
             "graph_name": dt_existence.get("graph_name", ""),
             "local_lbug_exists": dt_existence.get("local_lbug_exists", False),
             "local_lbug_path": dt_existence.get("local_lbug_path", ""),
+            "lakebase_table_exists": dt_existence.get("lakebase_table_exists"),
+            "lakebase_database": dt_existence.get("lakebase_database", ""),
+            "lakebase_schema": dt_existence.get("lakebase_schema", ""),
+            "lakebase_table": dt_existence.get("lakebase_table", ""),
+            "lakebase_synced_uc": dt_existence.get("lakebase_synced_uc", ""),
+            "lakebase_sync_mode": dt_existence.get("lakebase_sync_mode", "app_managed"),
             "registry_lbug_exists": dt_existence.get("registry_lbug_exists"),
             "registry_lbug_path": dt_existence.get("registry_lbug_path", ""),
             "registry_check_error": dt_existence.get("registry_check_error"),
-            "snapshot_table": dt_existence.get("snapshot_table", ""),
-            "snapshot_exists": dt_existence.get("snapshot_exists"),
-            "snapshot_check_error": dt_existence.get("snapshot_check_error"),
+            "graph_engine": dt_existence.get("graph_engine", "lakebase"),
+            "registry_archive_applicable": dt_existence.get(
+                "registry_archive_applicable", False
+            ),
             "last_built": last_build,
             "last_update": last_update,
             "has_data": ts_st.get("has_data", False),
-            "triple_count": ts_st.get("count", 0),
+            "triple_count": dt_existence.get("triple_count") or ts_st.get("count", 0),
             "needs_rebuild": needs_rebuild,
         }
 

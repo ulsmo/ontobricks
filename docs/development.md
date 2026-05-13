@@ -29,7 +29,7 @@ This document describes all external dependencies used by OntoBricks, including 
 | **RDFLib** | ≥7.6.0 | Python library for working with RDF (Resource Description Framework) | BSD-3-Clause | [rdflib.readthedocs.io](https://rdflib.readthedocs.io/) |
 | **python-dotenv** | ≥1.0.0 | Load environment variables from `.env` files | BSD-3-Clause | [pypi.org/project/python-dotenv](https://pypi.org/project/python-dotenv/) |
 | **requests** | ≥2.31.0 | HTTP library for Python | Apache-2.0 | [requests.readthedocs.io](https://requests.readthedocs.io/) |
-| **real_ladybug** | ≥0.1.0 | LadybugDB embedded graph database engine (Cypher-based, used by LadybugDB triplestore backend) | MIT | [pypi.org/project/real-ladybug](https://pypi.org/project/real-ladybug/) |
+| **psycopg[binary,pool]** | ≥3.2.0 | Postgres driver + connection pool used by the Lakebase Graph DB engine and the Lakebase registry backend | LGPL-3.0 | [psycopg.org/psycopg3](https://www.psycopg.org/psycopg3/) |
 | **APScheduler** | ≥3.10.0 | Advanced Python Scheduler for background jobs (used by BuildScheduler for scheduled triple store builds) | MIT | [pypi.org/project/APScheduler](https://pypi.org/project/APScheduler/) |
 | **owlrl** | ≥7.0.0 | OWL 2 RL forward-chaining reasoner — performs deductive closure on RDFLib graphs for ontology-level inference | W3C | [owl-rl.readthedocs.io](https://owl-rl.readthedocs.io/) |
 | **pyshacl** | ≥0.26.0 | W3C SHACL validator for RDFLib graphs — validates RDF data against SHACL shapes for data quality checks | Apache-2.0 | [github.com/RDFLib/pySHACL](https://github.com/RDFLib/pySHACL) |
@@ -262,9 +262,10 @@ new gridjs.Grid({
 
 | License | Packages |
 |---------|----------|
-| **MIT** | FastAPI, pydantic, pydantic-settings, Bootstrap, Bootstrap Icons, Sigma.js, Graphology, Grid.js, Chart.js, OntoViz, strawberry-graphql, real_ladybug, pytest, pytest-asyncio, pytest-cov, black, flake8 |
+| **MIT** | FastAPI, pydantic, pydantic-settings, Bootstrap, Bootstrap Icons, Sigma.js, Graphology, Grid.js, Chart.js, OntoViz, strawberry-graphql, pytest, pytest-asyncio, pytest-cov, black, flake8 |
 | **BSD-3-Clause** | Uvicorn, Starlette, Jinja2, itsdangerous, RDFLib, python-dotenv, httpx, NetworkX |
 | **Apache-2.0** | databricks-sql-connector, databricks-sdk, pyarrow, python-multipart, aiofiles, requests, fastmcp, MLflow, pyshacl, responses, playwright |
+| **LGPL-3.0** | psycopg (binary + pool) |
 | **BSD-2-Clause** | Sphinx |
 | **ISC** | D3.js |
 
@@ -371,10 +372,10 @@ tests/
   test_domain_session.py            # DomainSession state management
   test_databricks_client.py         # Databricks client (mocked)
   test_llm_utils.py                 # LLM retry logic
-  test_triplestore_factory.py       # Triplestore factory
-  test_ladybug.py                   # LadybugDB triple store backend (flat model)
-  test_ladybug_schema.py            # LadybugDB graph schema generation
-  test_ladybug_sync.py              # LadybugDB UC Volume sync
+  test_triplestore_factory.py       # Triplestore factory (Delta side)
+  test_graphdb_factory.py           # GraphDB engine factory
+  test_lakebase_flat_store.py       # Lakebase Postgres flat-store backend
+  test_synced_table_manager.py      # Lakeflow synced-table orchestration (managed_synced)
   test_routes.py                    # HTTP route tests (all endpoints)
   test_sql_wizard.py                # SQL Wizard service (pre-existing)
   test_ui_rendering.py              # UI Layer 1: HTML DOM structure tests (stdlib html.parser)
@@ -394,7 +395,6 @@ tests/
   test_middleware_session.py         # Session middleware tests
   test_helpers.py                   # Helper function unit tests
   test_rdfs_parser.py               # RDFS parser tests
-  test_ladybug_reasoning.py         # LadybugDB reasoning integration
   e2e/
     conftest.py                     # Uvicorn server + Playwright browser fixtures
     test_e2e_flows.py               # UI Layer 2: end-to-end browser tests (Playwright)
@@ -461,15 +461,18 @@ These use `unittest.mock` to isolate modules that depend on external systems (Da
 | `test_llm_utils.py` | 5 | `agents.llm_utils` | `call_llm_with_retry` -- success, retry on 429/503 HTTP errors, retry on timeout, retry exhaustion |
 | `test_triplestore_factory.py` | 4 | `back.core.triplestore.TripleStoreFactory` | Unknown backend handling, missing Delta config, successful Delta instantiation (mocked) |
 
-#### P1b -- LadybugDB Tests (82 tests)
+#### P1b -- Lakebase Graph DB Tests
 
-These test the LadybugDB embedded graph database backend end-to-end using a real `real_ladybug` database (on-disk in `/tmp`, cleaned up after each test). Skipped automatically if `real_ladybug` is not installed.
+These test the Lakebase Postgres graph engine. Heavy paths (`COPY FROM
+STDIN`, Lakeflow synced-table orchestration) are mocked at the
+`psycopg`/SDK boundary so the suite runs without a live Postgres or
+Databricks workspace.
 
-| Test File | Tests | Module Under Test | What Is Verified |
-|-----------|-------|-------------------|------------------|
-| `test_ladybug.py` | 45 | `back.core.triplestore.ladybugdb` | `LadybugFlatStore` flat model: lifecycle (create/drop/close), insert/query, count, status, aggregate stats, type/predicate distributions, find subjects (by type, search, pagination), resolve by ID, triples for subjects, seed subjects (all match modes), paginated queries, BFS traversal, pattern matching, neighbor expansion, SQL-to-Cypher condition translation |
-| `test_ladybug_schema.py` | 22 | `back.core.triplestore.ladybugdb` | `GraphSchema`, `NodeTableDef`, `RelTableDef`, identifier sanitization, local name extraction, schema generation from ontology classes + properties, URI-to-table mappings, fallback handling, DDL generation, triple classification (node inserts, relationships, attributes) |
-| `test_ladybug_sync.py` | 15 | `back.core.triplestore.ladybugdb` | Path helpers, `sync_to_volume` (success, missing local, upload failure), `sync_from_volume` (success, archive not found, download error, replace existing local) — UC service calls are mocked |
+| Test File | Module Under Test | What Is Verified |
+|-----------|-------------------|------------------|
+| `test_lakebase_flat_store.py` | `back.core.graphdb.lakebase.LakebaseFlatStore` | Table lifecycle, `insert_triples` (small + bulk paths via `bulk_insert_iter`), `query_triples`, `count_triples`, `delete_triples`, `bulk_delete_iter`, named queries (BFS, transitive closure, symmetric expansion), capability flags |
+| `test_synced_table_manager.py` | `back.core.graphdb.lakebase.SyncedTableManager` | Idempotent `ensure`, `_build_synced_table_payload`, refresh trigger, polling, race-handling on `ALREADY_EXISTS`, deletion |
+| `test_graphdb_factory.py` | `back.core.graphdb.GraphDBFactory` | Default engine resolution (`lakebase`), `engine_config` propagation, unknown-engine handling |
 
 #### P2 -- HTTP Route Tests (59 tests)
 
@@ -539,9 +542,8 @@ open htmlcov/index.html
 | `back/core/w3c/owl/OntologyGenerator.py` | 50% | Advanced OWL features (annotations, complex axioms) less covered |
 | `back/core/w3c/sparql/SparqlTranslator.py` | 41% | Large module; advanced translation paths need Databricks |
 | Routes (`front/routes/`, `api/routers/internal/`) | 11-40% | Route handlers require full app context for deeper testing |
-| `back/core/triplestore/ladybugdb/` | ~80% | Good coverage via real LadybugDB tests (flat model); graph model paths partially covered |
-| `back/core/triplestore/ladybugdb/GraphSchema.py` | ~90% | Schema generation, DDL, triple classification well covered |
-| `back/core/triplestore/ladybugdb/GraphSyncService.py` | ~95% | Sync to/from UC Volume fully tested with mocked UC service |
+| `back/core/graphdb/lakebase/LakebaseFlatStore.py` | ~80% | Triple CRUD, bulk paths and named queries covered with mocked psycopg |
+| `back/core/graphdb/lakebase/SyncedTableManager.py` | ~85% | `ensure` idempotency, refresh trigger, polling and delete fully tested with mocked Databricks SDK |
 
 Modules with 0% coverage (`back/core/w3c/rdfs`, `back/core/sqlwizard`, `back/core/databricks/MetadataService.py`) are either not yet tested or depend entirely on external services.
 

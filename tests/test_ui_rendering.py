@@ -232,6 +232,15 @@ class TestSettingsPage:
         html = _html(client, "/settings")
         assert _find(_tags(html), id_="btnSaveAllSettings") is not None
 
+    def test_graph_db_lakebase_health_block_present(self, client):
+        html = _html(client, "/settings")
+        assert _find(_tags(html), id_="lakebaseGraphHealthDl") is not None
+
+    def test_graph_db_lakebase_sync_controls_present(self, client):
+        html = _html(client, "/settings")
+        assert _find(_tags(html), id_="lakebaseSyncMode") is not None
+        assert _find(_tags(html), id_="lakebaseManagedSyncPanel") is not None
+
     def test_registry_pane_moved_to_registry_page(self, client):
         html = _html(client, "/registry/")
         assert _find(_tags(html), id_="registryDomainsSection") is not None

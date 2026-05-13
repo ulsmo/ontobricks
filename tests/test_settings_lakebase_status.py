@@ -1,16 +1,8 @@
 """Unit tests for ``SettingsService._lakebase_schema_status``.
 
-The status probe drives two distinct UI affordances on the admin
-Registry Location page:
-
-- ``initialized`` toggles the *Migrate to Lakebase* button visibility
-  when on the Lakebase backend (uninitialised ⇒ keep button visible
-  so the admin can populate the schema).
-- ``populated`` flips the same button between *Migrate* (clean
-  target) and *Re-sync from Volume* (overwrite warning) and hides it
-  outright when Lakebase is the active backend and already holds
-  data — running a migration there would silently overwrite live
-  rows.
+The status probe surfaces ``initialized`` + ``populated`` flags on
+the admin Registry Location page so operators can tell at a glance
+whether the Lakebase schema is ready and holding data.
 
 Both signals are best-effort: the probe must never raise. Any
 psycopg / connection / permission failure degrades to ``False``.
@@ -29,7 +21,6 @@ def _rcfg() -> RegistryCfg:
         catalog="cat",
         schema="sch",
         volume="vol",
-        backend="lakebase",
         lakebase_schema="ontobricks_registry",
         lakebase_database="",
     )

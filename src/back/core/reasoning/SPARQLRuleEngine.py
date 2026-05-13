@@ -1,9 +1,11 @@
 """SPARQL CONSTRUCT rule engine — execute inference rules as SPARQL queries.
 
 Each rule is a SPARQL CONSTRUCT query that produces new triples from
-existing graph data.  For LadybugDB backends the CONSTRUCT is converted
-to Cypher; for Delta backends the existing ``translate_sparql_to_spark()``
-infrastructure is used.
+existing graph data.  Cur­rently every supported triple store is SQL-
+based (Delta views, Lakebase Postgres) so the CONSTRUCT is translated
+to a SELECT against the flat ``(subject, predicate, object)`` table.
+A future Cypher / Gremlin backend would add its own translator branch
+here, gated by a capability flag on :class:`GraphDBBackend`.
 """
 
 import re
@@ -11,7 +13,6 @@ import time
 from typing import Any, Dict, List, Optional
 
 from back.core.logging import get_logger
-from back.core.graphdb.GraphDBBackend import GraphDBBackend
 from back.core.w3c.rdf_utils import uri_local_name
 from back.core.reasoning.constants import (
     CONSTRUCT_RE,
@@ -67,7 +68,6 @@ class SPARQLRuleEngine:
         """Run all SPARQL rules and collect results."""
         t0 = time.time()
         result = ReasoningResult()
-        is_cypher = GraphDBBackend.is_cypher_backend(store)
         self._uri_map = self._build_uri_map(ontology)
 
         for rule in rules:
@@ -84,7 +84,6 @@ class SPARQLRuleEngine:
                     store,
                     table_name,
                     ontology,
-                    is_cypher,
                     materialize,
                 )
                 result.merge(rule_result)
@@ -116,20 +115,13 @@ class SPARQLRuleEngine:
         store: Any,
         table_name: str,
         ontology: Dict,
-        is_cypher: bool,
         materialize: bool,
     ) -> ReasoningResult:
         result = ReasoningResult()
 
-        if is_cypher:
-            sql = self._construct_to_flat_cypher_select(
-                query,
-                table_name,
-                ontology,
-                store,
-            )
-        else:
-            sql = self._construct_to_sql(query, table_name, ontology)
+        sql = self._construct_to_sql(
+            query, store.sql_table_reference(table_name), ontology
+        )
 
         if not sql:
             logger.warning(
@@ -140,34 +132,17 @@ class SPARQLRuleEngine:
         logger.debug("SPARQL rule '%s' translated query:\n%s", name, sql)
 
         try:
-            if is_cypher:
-                conn = store.get_connection()
-                raw = conn.execute(sql)
-                for row in raw:
-                    s = row[0] if len(row) > 0 else ""
-                    p = row[1] if len(row) > 1 else ""
-                    o = row[2] if len(row) > 2 else ""
-                    result.inferred_triples.append(
-                        InferredTriple(
-                            subject=s,
-                            predicate=p,
-                            object=o,
-                            provenance=f"sparql:{name}",
-                            rule_name=name,
-                        )
+            raw = store.execute_query(sql)
+            for row in raw:
+                result.inferred_triples.append(
+                    InferredTriple(
+                        subject=row.get("s", ""),
+                        predicate=row.get("p", ""),
+                        object=row.get("o", ""),
+                        provenance=f"sparql:{name}",
+                        rule_name=name,
                     )
-            else:
-                raw = store.execute_query(sql)
-                for row in raw:
-                    result.inferred_triples.append(
-                        InferredTriple(
-                            subject=row.get("s", ""),
-                            predicate=row.get("p", ""),
-                            object=row.get("o", ""),
-                            provenance=f"sparql:{name}",
-                            rule_name=name,
-                        )
-                    )
+                )
         except Exception as e:
             logger.error("SPARQL rule query failed for '%s': %s", name, e)
 
@@ -280,81 +255,6 @@ class SPARQLRuleEngine:
             sql += f"WHERE {' AND '.join(conditions)}"
 
         return sql
-
-    def _construct_to_flat_cypher_select(
-        self,
-        query: str,
-        table_name: str,
-        ontology: Dict,
-        store: Any,
-    ) -> Optional[str]:
-        """Translate CONSTRUCT to a Cypher SELECT on the flat triple table."""
-        m = CONSTRUCT_RE.search(query)
-        if not m:
-            return None
-
-        construct_part = m.group(1).strip()
-        where_part = m.group(2).strip()
-        base_uri = ontology.get("base_uri", "")
-
-        construct_triples = TRIPLE_PATTERN_RE.findall(construct_part)
-        if not construct_triples:
-            return None
-
-        where_triples = TRIPLE_PATTERN_RE.findall(where_part)
-        if not where_triples:
-            return None
-
-        um = getattr(self, "_uri_map", None)
-        node_tbl = (
-            store.get_node_table(table_name)
-            if isinstance(store, GraphDBBackend)
-            else table_name
-        )
-        match_parts: List[str] = []
-        where_parts: List[str] = []
-        var_alias: Dict[str, str] = {}
-        alias_idx = 0
-
-        for ws, wp, wo in where_triples:
-            alias = f"w{alias_idx}"
-            alias_idx += 1
-            match_parts.append(f"MATCH ({alias}:{node_tbl})")
-
-            wp_resolved = self._resolve_term(wp, base_uri, um)
-            if wp_resolved == "a":
-                wp_resolved = RDF_TYPE
-            where_parts.append(f"{alias}.predicate = '{wp_resolved}'")
-
-            if ws.startswith("?"):
-                if ws in var_alias:
-                    where_parts.append(f"{alias}.subject = {var_alias[ws]}")
-                else:
-                    var_alias[ws] = f"{alias}.subject"
-            else:
-                where_parts.append(
-                    f"{alias}.subject = '{self._resolve_term(ws, base_uri, um)}'"
-                )
-
-            if wo.startswith("?"):
-                if wo in var_alias:
-                    where_parts.append(f"{alias}.object = {var_alias[wo]}")
-                else:
-                    var_alias[wo] = f"{alias}.object"
-            else:
-                where_parts.append(
-                    f"{alias}.object = '{self._resolve_term(wo, base_uri, um)}'"
-                )
-
-        s_ref = var_alias.get(construct_triples[0][0], f"'{construct_triples[0][0]}'")
-        p_term = self._resolve_term(construct_triples[0][1], base_uri, um)
-        if p_term == "a":
-            p_term = RDF_TYPE
-        o_ref = var_alias.get(construct_triples[0][2], f"'{construct_triples[0][2]}'")
-
-        lines = match_parts + [f"WHERE {' AND '.join(where_parts)}"]
-        lines.append(f"RETURN DISTINCT {s_ref} AS s, '{p_term}' AS p, {o_ref} AS o")
-        return "\n".join(lines)
 
     @staticmethod
     def _resolve_term(

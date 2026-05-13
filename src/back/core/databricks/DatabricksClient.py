@@ -73,6 +73,10 @@ class DatabricksClient:
     def execute_query(self, query):
         return self.sql.execute_query(query)
 
+    def iter_rows(self, query, batch_size: int = 5000):
+        """Stream warehouse query results as dict rows; see :meth:`SQLWarehouse.iter_rows`."""
+        return self.sql.iter_rows(query, batch_size=batch_size)
+
     def execute_statement(self, statement):
         return self.sql.execute_statement(statement)
 

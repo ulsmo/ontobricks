@@ -1009,6 +1009,123 @@ class TestOntologyDataNamespaceDrift:
         assert out["in_class"] is False
         assert "not found" in out["reason"]
 
+    # --- Bug 1: data triples in ontology form (#) ------------------------
+    #
+    # When data is inserted outside R2RML (direct insert, W3C round-trip,
+    # manual load) the triple predicates may stay in ontology form
+    # (``…#hasClaim``) instead of the data form (``…/hasClaim``).
+    # The old ``_outgoing_edge_index`` was a @staticmethod that stored raw
+    # predicates, so the lookup keyed on ``/hasClaim`` found nothing.
+    # After the fix, every predicate is normalised via ``_resolve_predicate``
+    # before indexing.
+
+    def _graph_with_ontology_form_predicates(self) -> List[Dict[str, str]]:
+        """Graph where data triples carry predicates in ontology (``#``) form
+        — simulates direct inserts or W3C OWL round-trips."""
+        return [
+            {"subject": "Alice", "predicate": RDF_TYPE, "object": self.BASE_HASH + "Person"},
+            {"subject": "Bob",   "predicate": RDF_TYPE, "object": self.BASE_HASH + "Person"},
+            {"subject": "P1",    "predicate": RDF_TYPE, "object": self.BASE_HASH + "Project"},
+            # Predicates in ONTOLOGY form (#) — not the data form (/).
+            {"subject": "Alice", "predicate": self.BASE_HASH + "PhasProject", "object": "P1"},
+            {"subject": "Bob",   "predicate": self.BASE_HASH + "PhasProject", "object": "P1"},
+        ]
+
+    def test_data_with_ontology_form_predicate_is_indexed_correctly(self):
+        """``_outgoing_edge_index`` must normalise triple predicates from
+        ontology form (``#``) to data form (``/``) so the path walker's
+        lookup (``/PhasProject``) finds the triples that were stored under
+        ``#PhasProject``."""
+        b = self._builder_with_base_uri(self._graph_with_ontology_form_predicates())
+        rule = CohortRule(
+            id="cohort",
+            label="Cohort",
+            class_uri=self.BASE_HASH + "Person",
+            links=[CohortLink(path=[
+                CohortHop(
+                    via=self.BASE_HASH + "PhasProject",   # ontology form
+                    target_class=self.BASE_HASH + "Project",
+                ),
+            ])],
+            min_size=2,
+        )
+        result = b.build(rule)
+        # Alice and Bob both reach P1 → 1 edge → 1 cohort
+        assert result.stats.edge_count == 1
+        assert result.stats.cohort_count == 1
+        members = {m for c in result.cohorts for m in c.members}
+        assert members == {"Alice", "Bob"}
+
+    def test_trace_shows_nonzero_raw_for_ontology_form_predicate(self):
+        """``trace_paths`` must report ``neighbours_raw > 0`` when data
+        predicates are in ontology form — before the fix it returned 0,
+        misleading users into thinking the predicate URI was wrong."""
+        b = self._builder_with_base_uri(self._graph_with_ontology_form_predicates())
+        out = b.trace_paths(
+            self.BASE_HASH + "Person",
+            [CohortLink(path=[
+                CohortHop(
+                    via=self.BASE_HASH + "PhasProject",
+                    target_class=self.BASE_HASH + "Project",
+                ),
+            ])],
+        )
+        h0 = out["links"][0]["hops"][0]
+        assert h0["neighbours_raw"] > 0, (
+            "Trace must show non-zero raw neighbours — got 0, "
+            "which would falsely trigger the 'no neighbours found' diagnostic"
+        )
+        assert h0["out_frontier"] > 0
+
+    # --- Bug 2: cross-namespace (foreign) predicate ----------------------
+    #
+    # Even after Bug 1, rules whose properties live in a *completely
+    # different* namespace (e.g. ``ontobricks.com/ontology#hasclaim``
+    # in a domain whose base is ``databricks-ontology.com/Cust360Auto#``)
+    # were still broken: ``_to_data_uri`` can only bridge ``#`` ↔ ``/``
+    # within the SAME base namespace. The fix adds ``_predicate_alias_map``
+    # + ``_resolve_predicate`` for a local-name fallback.
+
+    def test_via_from_foreign_namespace_resolved_by_local_name(self):
+        """Exact replica of the Cust360Auto production scenario:
+        - domain base:        ``databricks-ontology.com/Cust360Auto#``
+        - property in rule:   ``ontobricks.com/ontology#hasclaim``  (foreign)
+        - data triple pred:   ``databricks-ontology.com/Cust360Auto/hasclaim``
+        ``_to_data_uri`` cannot bridge these; the local-name alias fallback
+        in ``_resolve_predicate`` must produce the correct result."""
+        FOREIGN_NS = "https://ontobricks.com/ontology#"
+        DOMAIN_BASE = "https://databricks-ontology.com/Cust360Auto#"
+        DOMAIN_DATA = "https://databricks-ontology.com/Cust360Auto/"
+        triples = [
+            {"subject": "C1",  "predicate": RDF_TYPE, "object": DOMAIN_BASE + "Customer"},
+            {"subject": "C2",  "predicate": RDF_TYPE, "object": DOMAIN_BASE + "Customer"},
+            {"subject": "Cl1", "predicate": RDF_TYPE, "object": DOMAIN_BASE + "Claim"},
+            # Data triples use the DOMAIN's data namespace (not the foreign one).
+            {"subject": "C1", "predicate": DOMAIN_DATA + "hasclaim", "object": "Cl1"},
+            {"subject": "C2", "predicate": DOMAIN_DATA + "hasclaim", "object": "Cl1"},
+        ]
+        b = CohortBuilder(
+            store=_store_with(triples), graph_name="g", base_uri=DOMAIN_BASE
+        )
+        rule = CohortRule(
+            id="shared-claim",
+            label="SharedClaim",
+            class_uri=DOMAIN_BASE + "Customer",
+            links=[CohortLink(path=[
+                CohortHop(
+                    via=FOREIGN_NS + "hasclaim",   # foreign namespace
+                    target_class=DOMAIN_BASE + "Claim",
+                ),
+            ])],
+            min_size=2,
+        )
+        result = b.build(rule)
+        # C1 and C2 both reach Cl1 → 1 edge → 1 cohort of size 2
+        assert result.stats.edge_count == 1
+        assert result.stats.cohort_count == 1
+        members = {m for c in result.cohorts for m in c.members}
+        assert members == {"C1", "C2"}
+
 
 class TestTracePaths:
     """Per-hop path-trace diagnostic powering the Preview tab's

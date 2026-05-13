@@ -563,11 +563,18 @@ class BuildScheduler:
 
     @staticmethod
     def _store_for(host: str, token: str, registry_cfg: Dict[str, str]):
+        """Build the Lakebase :class:`RegistryStore` for *registry_cfg*.
+
+        ``host``/``token`` are accepted for signature compatibility with
+        the rest of the scheduler plumbing; Lakebase uses its own
+        PG*/JWT credentials so they are ignored.
+        """
         from back.objects.registry import RegistryCfg
         from back.objects.registry.store import RegistryFactory
 
+        del host, token
         cfg = RegistryCfg.from_dict(registry_cfg)
-        return RegistryFactory.from_cfg(cfg, host=host, token=token)
+        return RegistryFactory.from_cfg(cfg)
 
     def _load_schedules(
         self, host: str, token: str, registry_cfg: Dict[str, str]
@@ -708,14 +715,12 @@ class BuildScheduler:
     def _resolve_creds(settings):
         """Resolve host/token/registry from env-level settings (for startup).
 
-        The returned ``cfg`` carries ``backend``, ``lakebase_schema`` and
+        The returned ``cfg`` carries ``lakebase_schema`` and
         ``lakebase_database`` from *Settings* so that schedule-related
         store calls made *before* the global config has been loaded
         (e.g. on app boot, when restoring jobs) target the right
-        backend instead of silently defaulting to Volume. This matters
-        for Databricks Apps deployments that bind a Lakebase database
-        and want their schedules persisted there from the very first
-        APScheduler tick.
+        Lakebase database and schema from the very first APScheduler
+        tick.
         """
         from back.core.databricks import is_databricks_app
         from back.objects.registry.RegistryService import RegistryCfg
@@ -730,16 +735,6 @@ class BuildScheduler:
 
             host, token = get_databricks_host_and_token(_Stub(), settings)
 
-        # ``"auto"`` (the new default) → Lakebase when the runtime has
-        # injected PG* env vars and psycopg is importable, otherwise
-        # Volume. Centralised in ``resolve_default_backend`` so the
-        # scheduler subprocess and the FastAPI request path agree on
-        # which backend to use.
-        from back.objects.registry import resolve_default_backend
-
-        backend = resolve_default_backend(
-            getattr(settings, "registry_backend", None)
-        )
         lakebase_schema = (
             getattr(settings, "lakebase_schema", "ontobricks_registry")
             or "ontobricks_registry"
@@ -750,7 +745,6 @@ class BuildScheduler:
         if vol_path:
             parsed = RegistryCfg.from_volume_path(
                 vol_path,
-                backend=backend,
                 lakebase_schema=lakebase_schema,
                 lakebase_database=lakebase_database,
             )
@@ -761,7 +755,6 @@ class BuildScheduler:
             catalog=settings.registry_catalog,
             schema=settings.registry_schema,
             volume=settings.registry_volume or "OntoBricksRegistry",
-            backend=backend,
             lakebase_schema=lakebase_schema,
             lakebase_database=lakebase_database,
         )
@@ -1013,7 +1006,7 @@ def _generate_sql_from_r2rml(domain, domain_name: str):
         f"PREFIX : <{base_uri}>\n"
         "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\n"
         "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n\n"
-        "SELECT ?subject ?predicate ?object\n"
+        "SELECT DISTINCT ?subject ?predicate ?object\n"
         "WHERE {\n    ?subject ?predicate ?object .\n}"
     )
     res = sparql.translate_sparql_to_spark(sparql_q, ent, None, rels, dialect="spark")
@@ -1021,50 +1014,153 @@ def _generate_sql_from_r2rml(domain, domain_name: str):
     return res["sql"], view_table, graph_name, base_uri, ent, rels
 
 
+def _stream_into_store(store, src, graph_name: str, select_sql: str, batch: int = 5000) -> int:
+    """Stream warehouse rows into ``store.bulk_insert_iter`` (or list fallback)."""
+    rows = src.iter_rows(select_sql, batch_size=batch)
+    if hasattr(store, "bulk_insert_iter"):
+        return store.bulk_insert_iter(graph_name, rows, batch_size=batch)
+    return store.insert_triples(graph_name, list(rows), batch_size=min(batch, 500))
+
+
+def _is_managed_synced(store) -> bool:
+    """Lakebase store in managed_synced mode -- bulk goes via Lakeflow."""
+    return bool(getattr(store, "is_synced", False))
+
+
+def _apply_synced_pipeline(
+    store,
+    src,
+    delta_cfg: Dict[str, Any],
+    graph_name: str,
+    view_table: str,
+    *,
+    full: bool,
+    domain_name: str,
+    domain: Any = None,
+    settings: Any = None,
+) -> None:
+    """Trigger the Lakeflow synced-table refresh for *graph_name*.
+
+    Mirrors :meth:`_BuildPipeline._apply_via_synced_pipeline` so scheduled
+    builds also keep bulk data movement on the data plane.
+    """
+    from back.core.graphdb.lakebase.LakebaseFlatStore import (
+        resolve_sync_uc_fallback_catalog,
+    )
+    from back.core.graphdb.lakebase._sync_uc_schema import (
+        ensure_uc_schema_for_synced_table_fqn,
+    )
+
+    mgr = store.synced_manager()
+    if domain is not None and settings is not None:
+        fallback_cat = resolve_sync_uc_fallback_catalog(
+            domain, settings, delta_cfg
+        )
+    else:
+        fallback_cat = (delta_cfg or {}).get("catalog", "")
+    synced_uc = store.synced_uc_name(graph_name, fallback_catalog=fallback_cat)
+    logger.info(
+        "Scheduled build [%s]: managed-sync UC target %s "
+        "(sync_uc_catalog=%r; fallback_catalog=%r; graph_schema=%s)",
+        domain_name,
+        synced_uc,
+        (store.sync_uc_catalog or "").strip() or None,
+        fallback_cat or None,
+        store.graph_schema,
+    )
+    ensure_uc_schema_for_synced_table_fqn(
+        src,
+        synced_uc,
+        task_log_prefix=f"Scheduled build [{domain_name}]",
+    )
+    mgr.ensure(
+        synced_uc,
+        source_table_full_name=view_table,
+        primary_key_columns=["subject", "predicate", "object"],
+        sync_mode=store.sync_table_mode,
+    )
+    store.ensure_synced_companion(graph_name)
+    state = mgr.trigger_and_wait(synced_uc, timeout_s=store.sync_timeout_s)
+    logger.info(
+        "Scheduled build [%s]: synced table %s state=%s",
+        domain_name,
+        synced_uc,
+        state,
+    )
+    store.ensure_synced_union_view(graph_name)
+    if full:
+        try:
+            store.truncate_companion(graph_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Scheduled build [%s]: companion truncate failed (non-fatal): %s",
+                domain_name,
+                exc,
+            )
+
+
+def _count_view_triples(src, view_table: str) -> int:
+    """Return the server-side triple count for *view_table*."""
+    try:
+        rows = src.execute_query(f"SELECT COUNT(*) AS cnt FROM {view_table}")
+        return int(rows[0].get("cnt", 0)) if rows else 0
+    except Exception:
+        return 0
+
+
 def _write_graph_triples(
     store,
     src,
     graph_name: str,
     view_table: str,
-    actual_mode: str,
-    to_add: list,
-    to_remove: list,
-    incr_svc,
     domain_name: str,
+    delta_cfg: Optional[Dict[str, Any]] = None,
+    domain: Any = None,
+    settings: Any = None,
 ) -> int:
-    """Write triples to the graph store. Returns the triple count."""
-    if actual_mode == "full":
-        logger.info("Scheduled build [%s]: reading triples from VIEW", domain_name)
-        triples = src.execute_query(f"SELECT * FROM {view_table}")
-        triple_count = len(triples)
-        logger.info(
-            "Scheduled build [%s]: %d triples from VIEW", domain_name, triple_count
-        )
+    """Write triples to the graph store. Returns the triple count.
 
-        if triple_count > 0:
-            store.drop_table(graph_name)
-            store.create_table(graph_name)
-            store.insert_triples(graph_name, triples, batch_size=500)
-            store.optimize_table(graph_name)
-            logger.info(
-                "Scheduled build [%s]: graph '%s' populated with %d triples",
-                domain_name,
-                graph_name,
-                triple_count,
-            )
-    else:
-        triple_count = incr_svc.count_view_triples(view_table)
-        if to_remove:
-            store.delete_triples(graph_name, to_remove, batch_size=500)
-            logger.info(
-                "Scheduled build [%s]: removed %d triples", domain_name, len(to_remove)
-            )
-        if to_add:
-            store.insert_triples(graph_name, to_add, batch_size=500)
-            logger.info(
-                "Scheduled build [%s]: added %d triples", domain_name, len(to_add)
-            )
+    When the store is in Lakebase ``managed_synced`` mode the entire branch is
+    replaced by a Lakeflow snapshot refresh — triples never enter this process.
+    Otherwise a full drop-and-rebuild is performed.
+    """
+    if _is_managed_synced(store):
+        _apply_synced_pipeline(
+            store,
+            src,
+            delta_cfg or {},
+            graph_name,
+            view_table,
+            full=True,
+            domain_name=domain_name,
+            domain=domain,
+            settings=settings,
+        )
+        return _count_view_triples(src, view_table)
+
+    triple_count = _count_view_triples(src, view_table)
+    logger.info(
+        "Scheduled build [%s]: %d triples reported by VIEW",
+        domain_name,
+        triple_count,
+    )
+
+    if triple_count > 0:
+        store.drop_table(graph_name)
+        store.create_table(graph_name)
+        _stream_into_store(
+            store,
+            src,
+            graph_name,
+            f"SELECT subject, predicate, object FROM {view_table}",
+        )
         store.optimize_table(graph_name)
+        logger.info(
+            "Scheduled build [%s]: graph '%s' populated with %d triples",
+            domain_name,
+            graph_name,
+            triple_count,
+        )
     return triple_count
 
 
@@ -1073,8 +1169,8 @@ def _persist_domain_metadata(
 ):
     """Stamp last_build and write the domain doc via the active store.
 
-    ``svc`` is the :class:`RegistryService` that owns the right
-    :class:`RegistryStore` for the current backend (Volume or Lakebase).
+    ``svc`` is the :class:`RegistryService` that owns the
+    :class:`RegistryStore` (always Lakebase).
     ``version`` is the numeric version string (e.g. ``"1"``).
     """
     domain.last_build = build_ts
@@ -1103,18 +1199,20 @@ def _persist_domain_metadata(
 
 def _run_scheduled_build(
     domain_name: str,
-    drop_existing: bool,
+    drop_existing: bool,  # kept for backward-compat with persisted schedule configs
     settings,
     registry_cfg: Optional[Dict[str, str]] = None,
     version: str = "latest",
 ) -> None:
     """Execute a Digital Twin build for *domain_name* without a user session.
 
-    Loads the domain from the registry, generates SQL from R2RML,
-    creates the VIEW, and populates LadybugDB.
+    Loads the domain from the registry, generates SQL from R2RML, creates
+    the VIEW, and populates the graph store (full rebuild every run).
 
     When *version* is ``"latest"`` (default) the newest version is loaded.
-    Otherwise the specific version string is used.
+    The ``drop_existing`` flag is accepted for backward compatibility with
+    persisted schedule configs but has no effect — all scheduled builds are
+    full rebuilds.
 
     The entire function is wrapped in a fail-safe try/except so that
     no exception can silently escape to APScheduler's executor.
@@ -1152,7 +1250,7 @@ def _run_scheduled_build(
                     "name": "view",
                     "description": "Creating Triple-Store VIEW in Unity Catalog",
                 },
-                {"name": "graph", "description": "Populating LadybugDB graph"},
+                {"name": "graph", "description": "Populating Lakebase graph"},
             ],
         )
         tm.start_task(task.id, f"Starting scheduled build for {domain_name}...")
@@ -1223,63 +1321,8 @@ def _run_scheduled_build(
             raise InfrastructureError(f"Failed to create VIEW: {detail}")
         tm.update_progress(task.id, 40, "VIEW created")
 
-        # --- Incremental logic ---
-        from back.core.triplestore import IncrementalBuildService
-
-        incr_svc = IncrementalBuildService(src)
-
-        snapshot_table = incr_svc.snapshot_table_name(
-            (domain.info or {}).get("name", DEFAULT_GRAPH_NAME),
-            getattr(domain, "delta", None) or {},
-            version=getattr(domain, "current_version", "1"),
-        )
-
-        actual_mode = "full" if drop_existing else "incremental"
-        to_add: list = []
-        to_remove: list = []
-
-        if actual_mode == "incremental" and incr_svc.snapshot_exists(snapshot_table):
-            logger.info("Scheduled build [%s]: computing incremental diff", domain_name)
-            try:
-                to_add, to_remove = incr_svc.compute_diff(view_table, snapshot_table)
-                view_count = incr_svc.count_view_triples(view_table)
-                if incr_svc.should_fallback_to_full(
-                    len(to_add), len(to_remove), view_count
-                ):
-                    actual_mode = "full"
-                elif len(to_add) == 0 and len(to_remove) == 0:
-                    triple_count = view_count
-                    logger.info(
-                        "Scheduled build [%s]: no changes, skipping graph write",
-                        domain_name,
-                    )
-                    tm.update_progress(task.id, 90, "No changes detected")
-                    try:
-                        incr_svc.refresh_snapshot(view_table, snapshot_table)
-                    except Exception as snap_e:
-                        logger.warning(
-                            "Scheduled build [%s]: snapshot refresh failed: %s",
-                            domain_name,
-                            snap_e,
-                        )
-                    status = "success"
-                    message = f"No changes — {triple_count} triples unchanged"
-                    _persist_domain_metadata(
-                        svc, domain, version, build_ts, domain_name
-                    )
-                    return
-            except Exception as e:
-                logger.warning(
-                    "Scheduled build [%s]: incremental diff failed, falling back to full: %s",
-                    domain_name,
-                    e,
-                )
-                actual_mode = "full"
-        else:
-            actual_mode = "full"
-
         # --- Step 3: Populate graph ---
-        tm.advance_step(task.id, f"Applying changes to graph {graph_name}...")
+        tm.advance_step(task.id, f"Applying to graph {graph_name}...")
 
         from back.core.triplestore import get_triplestore
         from back.objects.digitaltwin.models import DomainSnapshot
@@ -1287,27 +1330,18 @@ def _run_scheduled_build(
         snap = DomainSnapshot(domain, host=host, token=token)
         store = get_triplestore(snap, settings, backend="graph")
         if not store:
-            raise InfrastructureError("Could not initialize LadybugDB backend")
+            raise InfrastructureError("Could not initialize graph backend")
 
         triple_count = _write_graph_triples(
             store,
             src,
             graph_name,
             view_table,
-            actual_mode,
-            to_add,
-            to_remove,
-            incr_svc,
             domain_name,
+            delta_cfg=getattr(domain, "delta", None) or {},
+            domain=domain,
+            settings=settings,
         )
-
-        try:
-            incr_svc.refresh_snapshot(view_table, snapshot_table)
-            logger.info("Scheduled build [%s]: snapshot refreshed", domain_name)
-        except Exception as snap_e:
-            logger.warning(
-                "Scheduled build [%s]: snapshot refresh failed: %s", domain_name, snap_e
-            )
 
         tm.update_progress(task.id, 95, "Saving domain metadata...")
         _persist_domain_metadata(svc, domain, version, build_ts, domain_name)

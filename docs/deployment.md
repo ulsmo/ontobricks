@@ -21,8 +21,8 @@ Deployment uses **Databricks Asset Bundles (DAB)** — a declarative, repeatable
            ├──────────────────┐
            ▼                  ▼
    ┌───────────────────────────────────┐
-   │  SQL Warehouse (Delta backend)    │
-   │  + LadybugDB (embedded graph)     │
+   │  SQL Warehouse (Delta view)       │
+   │  + Lakebase Postgres (Graph DB)   │
    └───────────────────────────────────┘
            │
            ▼
@@ -420,12 +420,11 @@ The main app's service principal performs the following operations at runtime. E
 | 1 | `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `DESCRIBE`, `SHOW VOLUMES`, `information_schema.tables` lookups (Data Source picker) | Source catalogs + registry catalog | `USE CATALOG` + `USE SCHEMA` + `SELECT` on browsed tables |
 | 2 | `SELECT` on source tables referenced by R2RML `sql_query` entries (VIEW creation + build) | Each source table/view | `SELECT` |
 | 3 | `CREATE OR REPLACE VIEW <registry_catalog>.<registry_schema>.triplestore_<domain>_V<n>` (Digital Twin Sync) | Registry schema | Schema `CREATE VIEW`. If an object with the same name already exists from a previous build, additionally `MANAGE` on it or SP ownership. |
-| 4 | `SELECT subject, predicate, object FROM <triplestore VIEW>` (SPARQL + Ladybug population) | The triplestore VIEW | `SELECT` (inherited by the SP as owner once it created the VIEW in step 3). |
-| 5 | `CREATE OR REPLACE TABLE <registry_catalog>.<registry_schema>._ob_snapshot_<domain>_v<n> AS SELECT ...` (incremental mode) | Registry schema | Schema `CREATE TABLE` (+ `MANAGE` / ownership if the snapshot already exists from a prior run). |
-| 6 | `SELECT` / `DROP TABLE IF EXISTS` on the snapshot table (incremental diff and cleanup) | Snapshot table | Inherited via ownership once the SP created it. |
-| 7 | `CREATE TABLE IF NOT EXISTS <table>(subject STRING, predicate STRING, object STRING) USING DELTA`, `DELETE FROM`, `INSERT INTO` on the optional `DATABRICKS_TRIPLESTORE_TABLE` fallback (reasoning materialisation, MCP session-less calls) | Fallback triple-store table | Schema `CREATE TABLE`. If the table pre-exists, `MODIFY` to `DELETE`/`INSERT` + `SELECT`. |
-| 8 | File I/O under `/Volumes/<registry_catalog>/<registry_schema>/<registry_volume>/` (projects, domains, history log, LadybugDB archives) | Registry volume | `READ VOLUME` + `WRITE VOLUME`. |
-| 9 | `POST /api/2.1/unity-catalog/volumes` — only triggered from **Settings → Registry → Initialize** when the volume does not yet exist | Registry schema | Schema `CREATE VOLUME` (skip if you create the volume manually up front). |
+| 4 | `SELECT subject, predicate, object FROM <triplestore VIEW>` (SPARQL + Lakebase Graph DB population) | The triplestore VIEW | `SELECT` (inherited by the SP as owner once it created the VIEW in step 3). |
+| 5 | `CREATE TABLE IF NOT EXISTS <table>(subject STRING, predicate STRING, object STRING) USING DELTA`, `DELETE FROM`, `INSERT INTO` on the optional `DATABRICKS_TRIPLESTORE_TABLE` fallback (reasoning materialisation, MCP session-less calls) | Fallback triple-store table | Schema `CREATE TABLE`. If the table pre-exists, `MODIFY` to `DELETE`/`INSERT` + `SELECT`. |
+| 6 | File I/O under `/Volumes/<registry_catalog>/<registry_schema>/<registry_volume>/` (projects, domains, history log, registry artefacts) | Registry volume | `READ VOLUME` + `WRITE VOLUME`. |
+| 7 | `POST /api/2.1/unity-catalog/volumes` — only triggered from **Settings → Registry → Initialize** when the volume does not yet exist | Registry schema | Schema `CREATE VOLUME` (skip if you create the volume manually up front). |
+| 8 | `CREATE SCHEMA IF NOT EXISTS`, `CREATE TABLE`, `INSERT … COPY FROM STDIN`, `SELECT`, `DELETE` on the App-bound Lakebase Postgres database (Graph DB engine + optionally registry hybrid backend) | Lakebase database | Lakebase user role with privileges on the configured schema (default `ontobricks_graph`). Authentication uses the App-injected OAuth token. |
 
 All the above run through the **SQL Warehouse** bound to the app (`sql-warehouse` resource) on behalf of the app SP. The `CAN_USE` grant on the warehouse covers compute access; data access is controlled by UC.
 
@@ -442,7 +441,7 @@ GRANT USE SCHEMA    ON SCHEMA  `<registry_catalog>`.`<registry_schema>` TO `<app
 GRANT CREATE TABLE  ON SCHEMA  `<registry_catalog>`.`<registry_schema>` TO `<app-sp>`;
 GRANT CREATE VIEW   ON SCHEMA  `<registry_catalog>`.`<registry_schema>` TO `<app-sp>`;
 
--- Registry Volume (files: projects, domains, history, Ladybug archives).
+-- Registry Volume (files: projects, domains, history, registry artefacts).
 -- The `volume` resource binding only grants compute reach-through; UC ACLs still apply.
 GRANT READ VOLUME   ON VOLUME  `<registry_catalog>`.`<registry_schema>`.`<registry_volume>` TO `<app-sp>`;
 GRANT WRITE VOLUME  ON VOLUME  `<registry_catalog>`.`<registry_schema>`.`<registry_volume>` TO `<app-sp>`;
@@ -728,17 +727,22 @@ databricks bundle run mcp_ontobricks_app -t dev-lakebase
 
 ---
 
-## 6. Triple Store Backend Configuration
+## 6. Triple Store & Graph DB Backend Configuration
 
-OntoBricks supports two triple store backends. Choose one in your project settings.
+OntoBricks always materializes both a Delta view (Unity Catalog) and a Graph DB engine (Lakebase Postgres). Both layers are pluggable through their respective factories — see `docs/graphdb-integration.md` for adding a new Graph DB engine.
 
-### Delta (`view`) — No Extra Setup Required
+### Delta view (`view`) — No Extra Setup Required
 
-Delta uses a Databricks SQL Warehouse to store triples in a Delta table. On Databricks Apps, the app's service principal authenticates via OAuth automatically — the only requirement is the SQL Warehouse resource declared in `app.yaml` (already configured).
+The Delta view is created by R2RML on a Databricks SQL Warehouse and persists triples for governance and lineage. On Databricks Apps, the app's service principal authenticates via OAuth automatically — the only requirement is the SQL Warehouse resource declared in `app.yaml` (already configured).
 
-### LadybugDB (`graph`) — No Extra Setup Required
+### Lakebase Postgres (`graph`, engine `lakebase`) — Bound by `databricks.yml`
 
-LadybugDB is an embedded graph database that stores data locally at `/tmp`. When the project has an ontology loaded, LadybugDB uses a true graph model (OWL classes become node tables, object properties become relationship tables). Graph data is automatically archived to the registry UC Volume when saving a project and restored on load.
+The Graph DB layer runs on the App-bound Lakebase Postgres instance. The Apps runtime injects `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` and OntoBricks mints a short-lived OAuth token via `WorkspaceClient().config.authenticate()`. Two write modes are available:
+
+- `app_managed` (default): the FastAPI app streams R2RML rows in `fetchmany` batches and ingests via `COPY FROM STDIN` + `INSERT … ON CONFLICT DO NOTHING`.
+- `managed_synced`: Databricks Lakeflow keeps a Postgres synced table in lock-step with the Delta view; OntoBricks orchestrates `SyncedTableManager.ensure` + `trigger_and_wait`. A writable companion table absorbs reasoning / cohort writes; readers see both via a UNION view.
+
+The `scripts/bootstrap-lakebase-perms.sh` script grants the app SP the required Lakebase / Postgres privileges (`CREATE` on the schema, `INSERT/SELECT/DELETE` on the per-domain tables). Run it once after the bundle is deployed.
 
 ---
 

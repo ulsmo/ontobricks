@@ -153,12 +153,11 @@ class TestCheckWarehouse:
 # ---------------------------------------------------------------------------
 
 
-def _fake_cfg(catalog="main", schema="bronze", volume="reg", backend="volume"):
+def _fake_cfg(catalog="main", schema="bronze", volume="reg"):
     return SimpleNamespace(
         catalog=catalog,
         schema=schema,
         volume=volume,
-        backend=backend,
         lakebase_schema="ontobricks_registry",
         lakebase_database="",
     )
@@ -298,8 +297,9 @@ class TestCheckLakebase:
             return_value=auth,
         ):
             status, detail = health._check_lakebase(MagicMock())
-        assert status == "ok"
-        assert "Volume backend" in detail
+        assert status == "warning"
+        assert "not bound" in detail
+        assert "PGHOST" in detail
 
     def test_initialized_returns_ok(self):
         auth = MagicMock(is_available=True)
@@ -364,7 +364,7 @@ class TestCheckLakebasePermissions:
             return_value=auth,
         ):
             status, detail = health._check_lakebase_permissions(MagicMock())
-        assert status == "ok"
+        assert status == "warning"
         assert "skipped" in detail.lower()
 
     def test_no_usage_is_error(self):

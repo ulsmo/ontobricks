@@ -88,7 +88,7 @@ class LakebaseAuth:
         if not host:
             raise ValidationError(
                 "PGHOST is not set — bind a Lakebase 'database' resource "
-                "to the Databricks App or set REGISTRY_BACKEND=volume."
+                "to the Databricks App. Lakebase is required since v0.4.0."
             )
         return host
 
@@ -105,8 +105,8 @@ class LakebaseAuth:
         user = os.environ.get("PGUSER", "")
         if not user:
             raise ValidationError(
-                "PGUSER is not set — bind a Lakebase 'database' resource "
-                "or set REGISTRY_BACKEND=volume."
+                "PGUSER is not set — bind a Lakebase 'database' resource. "
+                "Lakebase is required since v0.4.0."
             )
         return user
 

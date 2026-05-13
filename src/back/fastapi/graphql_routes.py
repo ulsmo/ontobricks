@@ -88,7 +88,7 @@ def _load_domain_from_registry(domain_name, session_mgr, settings):
     # If the user already has this registry folder open at a chosen version,
     # keep it. Otherwise GraphQL would call load_mcp_domain_data(), which
     # picks the newest version with mcp_enabled=True — often an older v3 while
-    # the user is on v4 — and would open the wrong LadybugDB file (.lbug) for
+    # the user is on v4 — and would open the wrong graph store snapshot for
     # subsequent Digital Twin / data-quality calls.
     session_folder = (getattr(domain, "domain_folder", None) or "").strip()
     session_ver = (getattr(domain, "current_version", None) or "").strip()
@@ -106,7 +106,6 @@ def _load_domain_from_registry(domain_name, session_mgr, settings):
                 domain_name,
                 session_ver,
             )
-            _ensure_ladybug_synced(domain, svc.uc)
             return domain
         logger.warning(
             "GraphQL: cannot read session version %s for '%s' (%s) — "
@@ -133,43 +132,7 @@ def _load_domain_from_registry(domain_name, session_mgr, settings):
         version,
     )
 
-    _ensure_ladybug_synced(domain, svc.uc)
-
     return domain
-
-
-def _ensure_ladybug_synced(domain, uc_service):
-    """Pull LadybugDB data from UC Volume to local disk if not already present.
-
-    Skips the download when a local ``.lbug`` file already exists so that
-    an in-progress build is never overwritten.
-    """
-    try:
-        import os
-        from back.core.helpers import (
-            effective_uc_version_path,
-            resolve_ladybug_local_path,
-        )
-        from back.core.graphdb.ladybugdb import sync_from_volume
-
-        uc_path = effective_uc_version_path(domain)
-        if not uc_path:
-            logger.warning("GraphQL LadybugDB: no UC domain path — skipping sync")
-            return
-        db_name = effective_graph_name(domain)
-        local = resolve_ladybug_local_path(domain, db_name)
-        if os.path.exists(local):
-            logger.debug(
-                "GraphQL LadybugDB: local file exists (%s) — skipping sync", local
-            )
-            return
-        ok, msg = sync_from_volume(uc_service, uc_path, db_name)
-        if ok:
-            logger.info("GraphQL LadybugDB: synced '%s' from volume", db_name)
-        else:
-            logger.warning("GraphQL LadybugDB: sync failed — %s", msg)
-    except Exception as e:
-        logger.warning("GraphQL LadybugDB: sync error — %s", e)
 
 
 def _get_schema_and_context(domain, settings):
@@ -193,7 +156,7 @@ def _get_schema_and_context(domain, settings):
     store = get_triplestore(domain, settings, backend="graph")
     if not store:
         raise InfrastructureError(
-            "Graph backend (LadybugDB) not configured or unreachable."
+            "Graph backend not configured or unreachable."
         )
 
     table = effective_graph_name(domain)

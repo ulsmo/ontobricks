@@ -65,22 +65,6 @@ SWRL SQL Translator
    :undoc-members:
    :show-inheritance:
 
-SWRL Cypher Translator
-----------------------
-
-.. automodule:: back.core.reasoning.SWRLCypherTranslator
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-SWRL Flat Cypher Translator
-----------------------------
-
-.. automodule:: back.core.reasoning.SWRLFlatCypherTranslator
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Decision Table Engine
 ---------------------
 

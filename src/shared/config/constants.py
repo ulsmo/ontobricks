@@ -57,7 +57,6 @@ DEFAULT_BASE_URI: str = "https://databricks-ontology.com/"
 # =====================================================
 DEFAULT_GRAPH_NAME: str = "ontobricks"
 DEFAULT_GRAPH_VERSION: str = "1"
-DEFAULT_LADYBUG_PATH: str = "/tmp/ontobricks"
 
 # =====================================================
 # Validation Messages (reusable across modules)

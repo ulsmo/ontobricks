@@ -52,11 +52,11 @@ scope:
 - `RegistryService.py` — owns all CRUD; delegates persistence to a `RegistryStore`. Constructor receives `RegistryCfg` (dataclass).
 - `permissions.py` — `PermissionService` encapsulates permission checks. Role constants are module-level.
 - `scheduler.py` — `BuildScheduler` wraps APScheduler. Module-level `get_scheduler()` returns singleton.
-- `store/` — backend abstraction. Two concrete stores, selected by `RegistryFactory.from_cfg(...)`:
-  - `store/volume/VolumeRegistryStore.py` — JSON-on-Volume, full registry (metadata + documents + binaries).
-  - `store/lakebase/LakebaseRegistryStore.py` — metadata/indexes in Lakebase Postgres (autoscaling only); documents/binaries (e.g. `.lbug`) **must still go to the UC Volume** via the same `VolumeFileService`. **Default backend whenever a Lakebase database is bound to the App.**
-- Backend coordinates (volume path, Lakebase host/db/schema) come from the Databricks App config — never hard-coded in code; user-visible only through **Settings → Registry**.
-- When to add here: persisting/loading domains, permissions, scheduling, or a new registry storage backend (subclass `RegistryStore` and register it in `RegistryFactory`).
+- `store/` — backend abstraction. Single concrete store, built via `RegistryFactory.from_cfg(...)`:
+  - `store/lakebase/LakebaseRegistryStore.py` — domains/versions/permissions/schedules/global config in Lakebase Postgres (autoscaling only). Documents and binaries (e.g. `.lbug.tar.gz`) **must still go to the UC Volume** via `VolumeFileService` — the store handles JSON-shaped data only.
+- Lakebase coordinates (host/db/schema) and the Volume triplet come from the Databricks App config — never hard-coded in code; user-visible only through **Settings → Registry**.
+- Pre-v0.4.0 deployments stored everything on the UC Volume; operators must run `scripts/migrate-registry-to-lakebase.sh` once before upgrading.
+- When to add here: persisting/loading domains, permissions, scheduling, or a new registry storage backend (subclass `RegistryStore` and add a constructor on `RegistryFactory`).
 
 **`back/objects/session/`** — middleware + managers + domain state:
 - `FileSessionMiddleware.py` — ASGI middleware + `get_session` helper.

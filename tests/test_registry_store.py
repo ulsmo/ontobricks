@@ -1,17 +1,15 @@
-"""Contract tests for the registry-store abstraction and migration helper.
+"""Contract tests for the registry-store abstraction.
 
-These tests use lightweight in-memory fakes (no Databricks/Postgres
+These tests use a lightweight in-memory fake (no Databricks/Postgres
 dependencies) to validate:
 
-- :class:`RegistryFactory` returns the correct concrete store and
-  gracefully surfaces a missing ``psycopg`` install for the Lakebase
-  backend.
-- :class:`VolumeRegistryStore` and :class:`LakebaseRegistryStore` agree
-  on the public ``RegistryStore`` interface (method names + return
-  shapes).
-- The Volume → Lakebase migration helper copies every JSON-shaped
-  artefact through the destination store and produces an idempotent
-  ``MigrationReport``.
+- :class:`RegistryFactory` returns the Lakebase store without eagerly
+  importing :mod:`psycopg`.
+- Every concrete :class:`RegistryStore` agrees on the public interface
+  (method names + return shapes).
+- :class:`LakebaseRegistryStore` honours the registry-identity model
+  (one schema = one registry, with legacy adoption) and surfaces
+  initialisation problems explicitly via :meth:`init_status`.
 
 Lakebase-only behaviour that requires a real Postgres connection lives
 in the gated ``tests/integration/`` suite.
@@ -26,13 +24,8 @@ import pytest
 
 from back.objects.registry import RegistryCfg
 from back.objects.registry.store import (
-    MigrationReport,
     RegistryFactory,
     RegistryStore,
-    VolumeRegistryStore,
-    build_store,
-    migrate_volume_to_lakebase,
-    summarize_migration,
 )
 from back.objects.registry.store.base import DomainSummary, ScheduleHistoryEntry
 
@@ -49,7 +42,7 @@ class _InMemoryStore(RegistryStore):
     """Minimal in-memory implementation used for migration round-trips.
 
     Just enough behaviour to exercise the public surface used by
-    :func:`migrate_volume_to_lakebase` and the contract tests below.
+    the store contract tests below.
     """
 
     def __init__(self, tag: str = "memory"):
@@ -162,29 +155,6 @@ class _InMemoryStore(RegistryStore):
 
 
 class TestRegistryFactory:
-    def test_for_backend_volume_default(self):
-        store = RegistryFactory.for_backend(
-            "volume", registry_cfg=CFG, host="h", token="t"
-        )
-        assert isinstance(store, VolumeRegistryStore)
-        assert store.backend == "volume"
-        assert store.cache_key.startswith("volume:")
-
-    def test_for_backend_unknown_falls_back_to_volume(self):
-        store = RegistryFactory.for_backend(
-            "nope", registry_cfg=CFG, host="h", token="t"
-        )
-        assert isinstance(store, VolumeRegistryStore)
-
-    def test_volume_explicit_constructor(self):
-        store = RegistryFactory.volume(registry_cfg=CFG, host="h", token="t")
-        assert isinstance(store, VolumeRegistryStore)
-
-    def test_from_cfg_dispatches_on_backend_attr(self):
-        cfg_volume = RegistryCfg(catalog="c", schema="s", volume="v")
-        store = RegistryFactory.from_cfg(cfg_volume, host="h", token="t")
-        assert isinstance(store, VolumeRegistryStore)
-
     def test_lakebase_factory_does_not_eagerly_import_psycopg(self, monkeypatch):
         """The Lakebase backend must be import-safe even when ``psycopg``
         is missing — the actual driver is only required when a method
@@ -230,10 +200,10 @@ class TestRegistryFactory:
         # that points at a different database.
         assert "ontobricks_other" in store.cache_key
 
-    def test_lakebase_factory_for_backend_plumbs_database(self, monkeypatch):
-        """End-to-end check that ``for_backend`` and ``from_cfg`` both
-        forward the override to the store — these are the entry points
-        ``RegistryService._build_store`` uses.
+    def test_from_cfg_plumbs_database_override(self, monkeypatch):
+        """``RegistryFactory.from_cfg`` must forward the
+        ``lakebase_database`` override to the store — this is the
+        entry point ``RegistryService._build_store`` uses.
         """
         monkeypatch.setenv("PGHOST", "test-host")
         monkeypatch.setenv("PGPORT", "5432")
@@ -244,35 +214,15 @@ class TestRegistryFactory:
             catalog="c",
             schema="s",
             volume="v",
-            backend="lakebase",
             lakebase_schema="ontobricks_registry",
             lakebase_database="ontobricks_other",
         )
 
         from back.objects.registry.store.lakebase import LakebaseRegistryStore
 
-        s1 = RegistryFactory.for_backend(
-            "lakebase",
-            registry_cfg=cfg,
-            lakebase_schema=cfg.lakebase_schema,
-            lakebase_database=cfg.lakebase_database,
-        )
-        assert isinstance(s1, LakebaseRegistryStore)
-        assert s1.describe()["effective_database"] == "ontobricks_other"
-
-        s2 = RegistryFactory.from_cfg(cfg)
-        assert isinstance(s2, LakebaseRegistryStore)
-        assert s2.describe()["effective_database"] == "ontobricks_other"
-
-
-class TestBuildStoreShim:
-    """The deprecated ``build_store`` function must still work as a
-    backward-compatible alias for :meth:`RegistryFactory.for_backend`.
-    """
-
-    def test_volume_default(self):
-        store = build_store("volume", registry_cfg=CFG, host="h", token="t")
-        assert isinstance(store, VolumeRegistryStore)
+        store = RegistryFactory.from_cfg(cfg)
+        assert isinstance(store, LakebaseRegistryStore)
+        assert store.describe()["effective_database"] == "ontobricks_other"
 
 
 # ---------------------------------------------------------------------
@@ -338,13 +288,6 @@ class TestStoreContract:
         history = store.load_schedule_history("a")
         assert len(history) == 3
         assert [h["timestamp"] for h in history] == ["2", "3", "4"]
-
-    def test_volume_store_cache_key_is_tagged(self):
-        s = VolumeRegistryStore(registry_cfg=CFG)
-        assert s.cache_key.startswith("volume:"), (
-            "Volume cache key must be backend-tagged so a runtime switch "
-            "to Lakebase invalidates the registry-level TTL cache."
-        )
 
     def test_table_row_counts_defaults_to_zero(self, store):
         # The base class returns zero for every requested table — only
@@ -785,118 +728,6 @@ class TestLakebaseTableRowCountsErrors:
         # under ``relation does not exist``.
         count_calls = [s for s, _ in cur.executed if "SELECT count(*)" in s]
         assert len(count_calls) == 1
-
-
-# ---------------------------------------------------------------------
-# Migration: Volume → Lakebase
-# ---------------------------------------------------------------------
-
-
-def _seed(src: _InMemoryStore) -> None:
-    src.save_global_config({"warehouse_id": "wh-1"})
-    src.save_schedules(
-        {
-            "demo": {"cron": "0 * * * *", "enabled": True, "version": "1"},
-            "other": {"cron": "@daily", "enabled": False, "version": "2"},
-        }
-    )
-    src.write_version(
-        "demo",
-        "1",
-        {
-            "info": {"name": "demo", "base_uri": "http://x/"},
-            "versions": [{"version": "1", "active": True}],
-        },
-    )
-    src.write_version(
-        "demo",
-        "2",
-        {
-            "info": {"name": "demo", "base_uri": "http://x/"},
-            "versions": [{"version": "2", "active": True}],
-        },
-    )
-    src.save_domain_permissions(
-        "demo", {"version": 1, "permissions": [{"user": "alice", "role": "admin"}]}
-    )
-    for ts in range(3):
-        src.append_schedule_history(
-            "demo", {"timestamp": str(ts), "status": "ok"}, max_entries=10
-        )
-
-
-class TestMigration:
-    def test_round_trip_copies_everything(self):
-        src, dst = _InMemoryStore("volume"), _InMemoryStore("lakebase")
-        _seed(src)
-
-        report = migrate_volume_to_lakebase(src, dst)
-
-        assert report.ok
-        assert report.global_config is True
-        assert report.schedules == 2
-        assert report.domains == 1
-        assert report.versions == 2
-        assert report.permission_sets == 1
-        assert report.history_entries == 3
-        assert report.errors == []
-
-        assert dst.load_global_config() == {"warehouse_id": "wh-1"}
-        assert dst.load_schedules().keys() == {"demo", "other"}
-        ok, versions, _ = dst.list_versions("demo")
-        assert ok and versions == ["1", "2"]
-        assert dst.load_domain_permissions("demo")["permissions"][0]["user"] == "alice"
-        assert len(dst.load_schedule_history("demo")) == 3
-
-    def test_idempotent_when_run_twice(self):
-        src, dst = _InMemoryStore("volume"), _InMemoryStore("lakebase")
-        _seed(src)
-
-        first = migrate_volume_to_lakebase(src, dst)
-        second = migrate_volume_to_lakebase(src, dst)
-
-        assert first.ok and second.ok
-        ok, versions, _ = dst.list_versions("demo")
-        assert ok and versions == ["1", "2"]
-
-    def test_destination_initialize_failure_short_circuits(self):
-        class _Broken(_InMemoryStore):
-            def initialize(self, *, client: Any = None):
-                return False, "ddl failed"
-
-        src = _InMemoryStore("volume")
-        _seed(src)
-        report = migrate_volume_to_lakebase(src, _Broken("lakebase"))
-
-        assert not report.ok
-        assert any("initialize destination" in e for e in report.errors)
-        assert report.versions == 0
-
-    def test_summarize_renders_human_readable(self):
-        report = MigrationReport(
-            domains=2, versions=5, permission_sets=1,
-            schedules=1, history_entries=4, global_config=True,
-        )
-        ok, msg = summarize_migration(report)
-        assert ok
-        assert "domains=2" in msg
-        assert "versions=5" in msg
-        assert "global_config=yes" in msg
-
-    def test_summarize_flags_errors(self):
-        report = MigrationReport(errors=["boom"])
-        ok, msg = summarize_migration(report)
-        assert ok is False
-        assert "errors=1" in msg
-        assert "boom" in msg
-
-    def test_summarize_flags_multiple_errors(self):
-        report = MigrationReport(errors=["boom", "kaboom", "fizzle"])
-        ok, msg = summarize_migration(report)
-        assert ok is False
-        assert "errors=3" in msg
-        assert "boom" in msg
-        assert "+2 more" in msg
 
 
 class TestFetchLakebaseRegistryTriplet:

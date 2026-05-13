@@ -7,6 +7,7 @@ from front.fastapi.dependencies import templates, triplestore_page_context
 from back.objects.session import SessionManager, get_session_manager, get_domain
 from back.core.helpers import effective_view_table
 from back.objects.digitaltwin import DigitalTwin
+from shared.config.settings import Settings, get_settings
 
 router = APIRouter(prefix="/dtwin", tags=["Query"])
 
@@ -15,6 +16,7 @@ router = APIRouter(prefix="/dtwin", tags=["Query"])
 async def query_page(
     request: Request,
     session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
 ):
     """Query page."""
     domain_session = get_domain(session_mgr)
@@ -42,7 +44,7 @@ async def query_page(
         request,
         "dtwin.html",
         {
-            **triplestore_page_context(domain_session),
+            **triplestore_page_context(domain_session, settings),
             "reasoning_ctx": reasoning_ctx,
             "domain_name": (domain_session.info or {}).get("name", "NewDomain"),
             "current_version": domain_session.current_version or "1",

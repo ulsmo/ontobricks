@@ -137,7 +137,6 @@ class TestDomainSessionDelta:
         fake_settings.registry_volume_path = (
             "/Volumes/benoit_cayla/ontobricks_deployed/registry"
         )
-        fake_settings.registry_backend = "volume"
         fake_settings.registry_catalog = ""
         fake_settings.registry_schema = ""
         fake_settings.registry_volume = ""
@@ -152,15 +151,13 @@ class TestDomainSessionDelta:
 
     def test_delta_uses_volume_binding_when_backend_lakebase(self, mock_session_mgr):
         # When the Apps runtime injects ``REGISTRY_VOLUME_PATH``, that
-        # triplet wins for ``RegistryCfg`` (even on Lakebase) so Delta
-        # resolution matches the mounted Volume. A stale Lakebase row
-        # must not override.
+        # triplet wins for ``RegistryCfg`` so Delta resolution matches
+        # the mounted Volume. A stale Lakebase row must not override.
         data = get_empty_domain()
         data["settings"]["registry"] = {
             "catalog": "stale_cat",
             "schema": "stale_sch",
             "volume": "stale_vol",
-            "backend": "lakebase",
         }
         data["domain"]["info"]["name"] = "Cust360Auto"
         data["domain"]["current_version"] = "4"
@@ -171,7 +168,6 @@ class TestDomainSessionDelta:
         fake_settings.registry_volume_path = (
             "/Volumes/benoit_cayla/ontobricks_deployed/registry"
         )
-        fake_settings.registry_backend = "lakebase"
         fake_settings.registry_catalog = ""
         fake_settings.registry_schema = ""
         fake_settings.registry_volume = ""

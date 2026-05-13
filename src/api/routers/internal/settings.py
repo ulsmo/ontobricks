@@ -197,40 +197,6 @@ async def get_registry(
     return config_service.build_registry_get_payload(session_mgr, settings)
 
 
-@router.post("/registry")
-async def save_registry(
-    request: Request,
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """Persist registry catalog / schema / volume in settings.registry.
-
-    When the registry is "locked" (i.e. the Volume is supplied by a
-    Databricks App resource), the bound triplet
-    ``catalog/schema/volume`` is read-only — those fields come from
-    the platform and editing them in-app would silently desync from
-    the actual binding. The **backend choice** (Volume ↔ Lakebase)
-    and the Lakebase-side knobs (``lakebase_schema``,
-    ``lakebase_database``) remain editable, since toggling the
-    backend only changes which storage layer the registry writes
-    JSON into; it does not move the bound resource around.
-    """
-    data = await request.json()
-
-    if config_service.is_registry_locked(settings):
-        locked_keys = {"catalog", "schema", "volume"}
-        attempted = locked_keys.intersection(k for k, v in data.items() if v)
-        if attempted:
-            raise ValidationError(
-                "Registry catalog/schema/volume are configured via Databricks "
-                "App resources and cannot be changed here. You can still switch "
-                "between Volume and Lakebase backends.",
-            )
-        data = {k: v for k, v in data.items() if k not in locked_keys}
-
-    return config_service.apply_registry_save(data, session_mgr)
-
-
 @router.post("/registry/initialize")
 async def initialize_registry(
     session_mgr: SessionManager = Depends(get_session_manager),
@@ -238,42 +204,6 @@ async def initialize_registry(
 ):
     """Create the registry Volume (and root marker) if they do not exist."""
     return config_service.initialize_registry_result(session_mgr, settings)
-
-
-@router.get(
-    "/registry/lakebase-databases",
-    dependencies=[Depends(require(ROLE_ADMIN))],
-)
-async def list_lakebase_databases(
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """List Postgres databases on the bound Lakebase instance (admin only).
-
-    Lets the Registry Location modal populate a "Lakebase Database"
-    picker so the admin can switch the registry to a different
-    database on the same instance without redeploying. ``connectable``
-    flags databases the service principal does not have ``CONNECT``
-    on, so the UI can disable them. Returns ``success=False`` (with a
-    ``message``) when Lakebase is not bound or psycopg is missing.
-    """
-    return config_service.list_lakebase_databases_result(session_mgr, settings)
-
-
-@router.post(
-    "/registry/migrate-to-lakebase",
-    dependencies=[Depends(require(ROLE_ADMIN))],
-)
-async def migrate_registry_to_lakebase(
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """Copy Volume registry data into Lakebase tables (admin only).
-
-    Binaries (``documents/``, ``*.lbug.tar.gz``) stay on the Unity
-    Catalog Volume. Idempotent at the Lakebase side.
-    """
-    return config_service.migrate_to_lakebase_result(session_mgr, settings)
 
 
 @router.get(
@@ -426,31 +356,6 @@ async def save_base_uri(
         base_uri, email, user_token, session_mgr, settings
     )
 
-
-@router.get("/get-cloud-fetch")
-async def get_cloud_fetch(
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """Get global CloudFetch toggle (instance-global)."""
-    return config_service.get_cloud_fetch_result(session_mgr, settings)
-
-
-@router.post("/save-cloud-fetch")
-async def save_cloud_fetch(
-    request: Request,
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """Save global CloudFetch toggle (admin only, stored globally)."""
-    data = await request.json()
-    enabled = bool(data.get("use_cloud_fetch", True))
-    email, _display_name, user_token, _user_role, _user_domain_role = (
-        _settings_request_identity(request)
-    )
-    return config_service.save_cloud_fetch_result(
-        enabled, email, user_token, session_mgr, settings
-    )
 
 
 # ===========================================
@@ -742,7 +647,7 @@ async def set_graph_engine(
 ):
     """Set the graph DB engine (admin only, stored globally)."""
     data = await request.json()
-    engine = data.get("graph_engine", "ladybug")
+    engine = data.get("graph_engine", "lakebase")
     email, _display_name, user_token, _user_role, _user_domain_role = (
         _settings_request_identity(request)
     )
@@ -760,6 +665,73 @@ async def get_graph_engine_config(
     return config_service.get_graph_engine_config_result(session_mgr, settings)
 
 
+@router.get("/graph-engine/lakebase-health")
+async def get_graph_engine_lakebase_health(
+    session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
+):
+    """Probe Lakebase connectivity and graph schema (saved global config)."""
+    return config_service.graph_engine_lakebase_health_result(session_mgr, settings)
+
+
+@router.get("/graph-engine/uc-catalogs")
+async def get_graph_engine_uc_catalogs(
+    session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
+):
+    """Unity Catalog names for the Lakebase managed-sync UC catalog picker (read-only)."""
+    return config_service.graph_engine_uc_catalogs_result(session_mgr, settings)
+
+
+@router.get("/graph-engine/uc-schemas")
+async def get_graph_engine_uc_schemas(
+    catalog: str = "",
+    session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
+):
+    """Unity Catalog schemas within a catalog for the managed-sync UC schema picker."""
+    return config_service.graph_engine_uc_schemas_result(catalog, session_mgr, settings)
+
+
+@router.get("/graph-engine/lakebase-projects")
+async def get_graph_engine_lakebase_projects(
+    session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
+):
+    """List Lakebase Autoscaling projects visible in the workspace."""
+    return config_service.graph_engine_lakebase_projects_result(session_mgr, settings)
+
+
+@router.get("/graph-engine/lakebase-branches")
+async def get_graph_engine_lakebase_branches(
+    project: str = "",
+    session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
+):
+    """List branches for a Lakebase Autoscaling project."""
+    return config_service.graph_engine_lakebase_branches_result(project, session_mgr, settings)
+
+
+@router.get("/graph-engine/lakebase-pg-databases")
+async def get_graph_engine_lakebase_pg_databases(
+    branch: str = "",
+    session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
+):
+    """List Postgres databases on a Lakebase branch."""
+    return config_service.graph_engine_lakebase_pg_databases_result(branch, session_mgr, settings)
+
+
+@router.get("/graph-engine/lakebase-pg-schemas")
+async def get_graph_engine_lakebase_pg_schemas(
+    database: str = "",
+    session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
+):
+    """List Postgres schemas in a Lakebase database."""
+    return config_service.graph_engine_lakebase_pg_schemas_result(database, session_mgr, settings)
+
+
 @router.post("/graph-engine-config")
 async def set_graph_engine_config(
     request: Request,
@@ -773,23 +745,6 @@ async def set_graph_engine_config(
     return config_service.set_graph_engine_config_result(
         config, email, user_token, session_mgr, settings
     )
-
-
-# ===========================================
-# LadybugDB Local Files
-# ===========================================
-
-
-@router.get("/ladybugdb/files")
-async def list_ladybugdb_files():
-    """List files and directories stored in the LadybugDB local directory."""
-    return config_service.list_ladybugdb_files()
-
-
-@router.delete("/ladybugdb/files/{filename:path}")
-async def delete_ladybugdb_file(filename: str):
-    """Delete a file or directory from the LadybugDB local directory."""
-    return config_service.delete_ladybugdb_file(filename)
 
 
 # ===========================================

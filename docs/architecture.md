@@ -6,7 +6,7 @@ OntoBricks is a web-based **Knowledge Graph Builder** that runs natively on Data
 
 1. **Design** an ontology visually (or import one from OWL / industry standards).
 2. **Map** ontology entities to Unity Catalog tables using R2RML.
-3. **Materialize** a triple store (Delta table or embedded LadybugDB graph).
+3. **Materialize** a triple store (Delta table) and a graph backend (Lakebase Postgres).
 4. **Explore** the resulting knowledge graph — visual navigation, SPARQL, GraphQL, data-quality checks, and reasoning.
 
 Under the hood, SPARQL translates ontology mappings into Spark SQL — users never need to write SPARQL themselves.
@@ -21,8 +21,8 @@ Under the hood, SPARQL translates ontology mappings into Spark SQL — users nev
 | **MCP Server** | Separate Databricks App (`mcp-ontobricks`) exposing knowledge-graph tools to LLM clients (Cursor, Claude Desktop, Playground) |
 | **FastAPI Application** | Routes → Domain Objects → Core layered architecture with GlobalConfigService, PermissionService, and BuildScheduler |
 | **LLM Agents** | MLflow-traced agentic loops for ontology generation, auto-mapping, icon mapping, and conversational assistance |
-| **Reasoning Engine** | OWL 2 RL deductive closure, SWRL rules (compiled to SQL / Cypher), graph reasoning, and constraint validation |
-| **Triple Store Backends** | Pluggable Delta and LadybugDB backends via a factory pattern, with BFS, shortest path, and transitive closure built in |
+| **Reasoning Engine** | OWL 2 RL deductive closure, SWRL rules (compiled to SQL), graph reasoning, and constraint validation |
+| **Triple Store Backends** | Delta-backed view in Unity Catalog plus a pluggable Graph DB engine (currently Lakebase Postgres) via the `GraphDBFactory` pattern, with BFS, shortest path, and transitive closure built in |
 | **Databricks Platform** | Unity Catalog (metadata & governance), SQL Warehouse (query execution), UC Volumes (shared storage) |
 
 ---
@@ -43,7 +43,7 @@ The stack shows how each layer builds upon the previous:
 | **Rules** | SWRL | Horn-clause rules for inference and violation detection |
 | **Ontology** | OWL/RDFS | Defines classes and properties |
 | **Data** | RDF | Triple data model (S, P, O) |
-| **Storage** | SQL / Cypher | Delta table (Spark SQL) or LadybugDB (Cypher) |
+| **Storage** | SQL | Delta view (Spark SQL) + Lakebase Postgres flat triple table |
 
 ---
 
@@ -171,7 +171,7 @@ LIMIT 100
 
 ### 5. Query Processing Pipeline (inspired by SANSA)
 
-**What it is**: OntoBricks translates ontology mappings into SQL queries to extract triples from Databricks tables and materialize them into a triple store (Delta table or LadybugDB embedded graph).
+**What it is**: OntoBricks translates ontology mappings into SQL queries to extract triples from Databricks tables and materialize them into a Delta view in Unity Catalog and into the configured Graph DB engine (Lakebase Postgres).
 
 **How OntoBricks implements this** (inspired by the [SANSA Stack](https://github.com/SANSA-Stack)):
 
@@ -185,10 +185,8 @@ LIMIT 100
 4. **R2RML Analyzer** - Load TriplesMap definitions, build mappings
 5. **SPARQL→SQL Translator** - Match patterns to mappings, generate SQL
 6. **Generated Spark SQL** - Query with JOINs and UNION ALL
-7. **Triple Store Backend Dispatch** - Factory routes to the configured backend:
-   - **Delta**: SQL Warehouse executes Spark SQL
-   - **LadybugDB** (7b): Bypasses SQL translation entirely; uses native Cypher against the ontology-derived graph schema
-8. **RDF-style Results** - Uniform (subject, predicate, object) triples from all backends
+7. **Triple Store Backend Dispatch** - The `TripleStoreFactory` returns a Delta-backed view client (`DeltaTripleStore`) and `GraphDBFactory` returns the active graph engine (`LakebaseFlatStore`). Both expose the same `(subject, predicate, object)` contract.
+8. **RDF-style Results** - Uniform (subject, predicate, object) triples from both backends
 9. **Knowledge Graph** - Sigma.js WebGL-powered graph with entity details panel, search, filtering, and data cluster detection (Louvain/Label Propagation/Greedy Modularity)
 
 **Generated Spark SQL Example** (for generic triple query):
@@ -278,7 +276,7 @@ To add a new generation template, add an entry to `WIZARD_TEMPLATES` in `src/sha
 | `default_base_uri` | Default ontology base URI domain | Admin only |
 | `default_emoji` | Default class icon emoji (e.g. `📦`) | Admin only |
 
-The service caches the JSON file in memory with a TTL to minimize UC Volume reads. Settings are resolved via `resolve_warehouse_id()`, `resolve_default_base_uri()`, and `resolve_default_emoji()` helper functions in `src/back/core/helpers/`. For version-scoped UC paths and LadybugDB local layout, `DatabricksHelpers.py` also provides `effective_uc_version_path` and `resolve_ladybug_local_path`.
+The service caches the JSON file in memory with a TTL to minimize UC Volume reads. Settings are resolved via `resolve_warehouse_id()`, `resolve_default_base_uri()`, and `resolve_default_emoji()` helper functions in `src/back/core/helpers/`. Version-scoped UC paths are derived through `effective_uc_version_path` in `DatabricksHelpers.py`.
 
 **UC Volume file layout** (root of the configured registry volume):
 
@@ -292,12 +290,10 @@ The service caches the JSON file in memory with a TTL to minimize UC Volume read
         ├── .domain_permissions.json  # Optional per-domain role overrides
         ├── V1/
         │   ├── V1.json                                    # Domain version payload
-        │   ├── documents/                                 # Version-scoped documents
-        │   └── ontobricks_{name}_V1.lbug.tar.gz           # LadybugDB archive
+        │   └── documents/                                 # Version-scoped documents
         ├── V2/
         │   ├── V2.json
-        │   ├── documents/
-        │   └── ontobricks_{name}_V2.lbug.tar.gz
+        │   └── documents/
         └── ...
 ```
 
@@ -388,19 +384,21 @@ src/
 │   │   ├── graphql/                    # GraphQLSchemaBuilder, ResolverFactory, SchemaMetadata
 │   │   ├── triplestore/                # Triple store backend abstraction
 │   │   │   ├── TripleStoreBackend.py   # Abstract interface
-│   │   │   ├── TripleStoreFactory.py   # Backend factory ("view" → Delta, "graph" → LadybugDB)
-│   │   │   ├── IncrementalBuildService.py
-│   │   │   ├── delta/                  # DeltaTripleStore (SQL Warehouse backend)
-│   │   │   └── ladybugdb/              # LadybugGraphStore, LadybugFlatStore, GraphSchema, etc.
+│   │   │   ├── TripleStoreFactory.py   # Backend factory ("view" → Delta, "graph" → GraphDB engine)
+│   │   │   └── delta/                  # DeltaTripleStore (SQL Warehouse backend)
+│   │   │
+│   │   ├── graphdb/                    # Pluggable Graph DB engines (lakebase, …)
+│   │   │   ├── GraphDBBackend.py       # Abstract interface (capability flags, named queries)
+│   │   │   ├── GraphDBFactory.py       # Engine dispatch (engine="lakebase")
+│   │   │   ├── lakebase/               # LakebaseFlatStore, LakebaseBase, SyncedTableManager
+│   │   │   └── _starter_kit/           # ExampleStore template for new engines
 │   │   │
 │   │   ├── reasoning/                  # Reasoning engine (OWL 2 RL + SWRL + SPARQL rules + Decision tables)
 │   │   │   ├── ReasoningService.py     # Multi-phase orchestrator
 │   │   │   ├── OWLRLReasoner.py        # OWL 2 RL deductive closure via owlrl
 │   │   │   ├── SWRLEngine.py           # SWRL rule execution, backend dispatch
 │   │   │   ├── SWRLParser.py           # SWRL rule parsing
-│   │   │   ├── SWRLSQLTranslator.py    # SWRL → Spark SQL
-│   │   │   ├── SWRLCypherTranslator.py # SWRL → Cypher
-│   │   │   ├── SWRLFlatCypherTranslator.py
+│   │   │   ├── SWRLSQLTranslator.py    # SWRL → Spark/Postgres SQL
 │   │   │   ├── SWRLBuiltinRegistry.py  # SWRL built-in function registry
 │   │   │   ├── SPARQLRuleEngine.py     # SPARQL-based rule execution
 │   │   │   ├── AggregateRuleEngine.py  # Aggregate rule support
@@ -466,9 +464,8 @@ tests/                                  # Test suite (at project root)
 ├── conftest.py
 ├── e2e/                                # End-to-end tests
 │   └── test_e2e_flows.py
-├── test_ladybug.py
-├── test_ladybug_schema.py
-├── test_ladybug_sync.py
+├── test_lakebase_flat_store.py
+├── test_synced_table_manager.py
 ├── test_reasoning.py
 ├── test_reasoning_service.py
 ├── test_permissions.py
@@ -595,7 +592,7 @@ Long-running operations use the **TaskManager** pattern (`src/back/core/task_man
 
 | Task Type | Triggered By | Description |
 |-----------|-------------|-------------|
-| `triplestore_sync` | Digital Twin → Build | Generates and writes triples to the configured backend (Delta or LadybugDB) |
+| `triplestore_sync` | Digital Twin → Build | Generates and writes triples to Delta and the configured Graph DB engine (Lakebase) |
 | `quality_checks` | Digital Twin → Quality | Runs all quality checks sequentially with per-check progress |
 | `auto_assign` | Mapping → Auto-Map | Batch-maps entities and relationships via LLM; splits large jobs into chunks of `AUTO_ASSIGN_CHUNK_SIZE` with cooldown between chunks to avoid rate limits |
 
@@ -662,50 +659,41 @@ The `DomainSession` class (`src/back/objects/session/DomainSession.py`) provides
 
 ---
 
-## Registry Storage Backends
+## Registry Storage
 
-OntoBricks supports two backends for the domain registry, selected
-instance-wide by an admin in **Settings → Registry / Registry
-Location**. Both backends co-exist behind a single
-:class:`RegistryStore` abstraction so route handlers and services are
-agnostic to which one is active.
+Since v0.4.0 the domain registry lives in **Databricks Lakebase**
+(Postgres). The historical JSON-on-Volume backend was removed —
+operators with pre-v0.4.0 deployments must run
+`scripts/migrate-registry-to-lakebase.sh` once before upgrading. The
+Unity Catalog Volume is still wired in but is now reserved for binary
+artefacts (`documents/` uploads and registry export bundles).
 
-### Backend matrix
+| Storage | Identifier | What lives in it |
+|---|---|---|
+| Databricks Lakebase (Postgres) | `lakebase` | Domain JSON, permissions, schedules, history, global config — normalised into seven Postgres tables (with JSONB columns for the larger blobs) |
+| Unity Catalog Volume | n/a | `documents/` uploads + ad-hoc registry exports |
 
-| Backend | Identifier | What lives in it | Binaries (`documents/`, `*.lbug.tar.gz`) |
-|---|---|---|---|
-| Unity Catalog Volume *(default)* | `volume` | Domain JSON, permissions, schedules, history, global config — all serialised as JSON files on the Volume | Same Volume |
-| Databricks Lakebase (Postgres) | `lakebase` | Same data, normalised into Postgres tables (with JSONB columns for the larger blobs) | **Still on the Volume** — Lakebase is registry-data only |
+The single :class:`RegistryStore` implementation
+(`LakebaseRegistryStore`) is constructed via `RegistryFactory.from_cfg`.
+Route handlers and services talk to the abstract interface and stay
+storage-agnostic.
 
-Switching backend is a runtime setting; it does not migrate data on
-its own. A one-shot **Migrate to Lakebase** button in the admin UI
-copies every JSON-shaped artefact from the Volume into Lakebase
-(`POST /settings/registry/migrate-to-lakebase` →
-`back/objects/registry/store/migration.py`). Binary artefacts stay on
-the Volume in both modes.
-
-### Volume layout (default)
+### Volume layout (binaries only)
 
 ```
 Unity Catalog
 └── catalog (e.g., main)
     └── schema (e.g., ontobricks)
         └── volume (e.g., OntoBricksRegistry)
-            ├── .registry                      # marker
-            ├── .global_config.json            # warehouse, schedules, emoji, …
             └── domains/
                 └── {domain_name}/
-                    ├── .domain_permissions.json
-                    ├── .schedule_history.json
                     ├── V1/
-                    │   ├── V1.json
-                    │   ├── documents/
-                    │   └── ontobricks_{name}_V1.lbug.tar.gz
+                    │   └── documents/           # user-uploaded files
                     ├── V2/…
                     └── V3/…
 ```
 
-### Lakebase layout (opt-in)
+### Lakebase layout
 
 The Postgres schema (default `ontobricks_registry`) holds seven
 relational tables:
@@ -729,8 +717,9 @@ tier since 2026-03-12); Provisioned instances are not supported. The
 connection layer retries on `SQLSTATE 57P03` to absorb scale-from-zero
 cold-starts.
 
-Binary artefacts (`documents/`, `*.lbug.tar.gz`) keep the Volume
-layout above regardless of which backend is selected.
+Binary artefacts (`documents/` uploads and registry export bundles)
+continue to live on the Unity Catalog Volume above, managed by
+`VolumeFileService`.
 
 ### Export Format (Versioned)
 
@@ -788,49 +777,40 @@ User Action → OntoViz Event → Debounce → syncDesignToOntology → /ontolog
 
 ---
 
-## Triple Store Backends
+## Triple Store & Graph DB Backends
 
-OntoBricks supports two interchangeable triple store backends, selectable per domain in the **Domain → Information → Triple Store** tab:
+OntoBricks separates two concerns:
 
-| Backend | Key | Storage | Query Language | Use Case |
-|---------|-----|---------|----------------|----------|
-| **Delta** | `view` | Databricks Delta table via SQL Warehouse | Spark SQL | Production workloads on Databricks with full Unity Catalog governance |
-| **LadybugDB** | `graph` | Embedded graph database on local disk (`/tmp`) | Cypher | Lightweight, zero-infrastructure local development and demos |
+1. **Triple Store** — the persistent, governance-controlled view of the triples in **Unity Catalog Delta** (`triplestore_<domain>_V<n>`). Always present, never optional.
+2. **Graph DB** — the queryable graph engine used by the Digital Twin, reasoning, and BFS / shortest-path helpers. Pluggable via the `GraphDBFactory` abstraction.
+
+| Layer | Key | Storage | Query Language | Source of truth |
+|-------|-----|---------|----------------|-----------------|
+| **Delta Triple Store** | `view` | Databricks Delta view via SQL Warehouse | Spark SQL | Yes (R2RML output) |
+| **Lakebase Graph DB** | `graph` (engine `lakebase`) | Postgres flat `(subject, predicate, object)` table on the App-bound Lakebase instance | Postgres SQL | Mirror of the Delta view |
 
 ### Backend Abstraction
 
-All backends implement the `TripleStoreBackend` abstract base class (`src/back/core/triplestore/TripleStoreBackend.py`), which defines a common interface for:
+The Delta path implements `TripleStoreBackend` (`src/back/core/triplestore/TripleStoreBackend.py`); the graph path implements `GraphDBBackend` (`src/back/core/graphdb/GraphDBBackend.py`). Both expose the same surface for:
+
 - Table lifecycle: `create_table`, `drop_table`, `table_exists`
 - Triple operations: `insert_triples`, `query_triples`, `count_triples`
-- Named queries: `get_aggregate_stats`, `find_subjects_by_type`, `bfs_traversal`, etc.
+- Named queries: `get_aggregate_stats`, `find_subjects_by_type`, `bfs_traversal`, …
 
-The factory (`src/back/core/triplestore/TripleStoreFactory.py`) reads `domain.triplestore.backend` and returns the appropriate implementation.
+`TripleStoreFactory` returns the Delta view client; `GraphDBFactory` returns the configured graph engine. Capability flags on `GraphDBBackend` (`supports_cypher`, `is_cypher_backend`, `query_dialect`) are kept as architectural seams so future engines (Neo4j, Memgraph, Gremlin, …) can be added without rewiring the reasoning layer.
 
-### LadybugDB Architecture
+### Lakebase Graph DB Architecture
 
-LadybugDB (`real_ladybug`) is an embedded graph database with Cypher query support. It differs from Delta in several ways:
+Lakebase Postgres is the only currently shipped Graph DB engine. The implementation lives in `src/back/core/graphdb/lakebase/` (`LakebaseFlatStore`, `LakebaseBase`, `SyncedTableManager`).
 
-**Storage Model:**
-- Data lives on local disk at `/tmp/ontobricks_<project_name>.lbug`
-- Supports two internal models:
-  - **Flat model**: A single `Triple` node table with `(id, subject, predicate, object)` columns — used when no ontology is provided
-  - **Graph model**: Ontology classes become node tables, object properties become relationship tables — used when the domain has a loaded ontology
+**Storage model** — one flat `(subject, predicate, object)` table per domain version inside a configurable Postgres schema (default `ontobricks_graph`) on the App-bound Lakebase database. Connection comes from the same OAuth/M2M credential the registry hybrid backend uses.
 
-**Graph Schema Generation** (`src/back/core/triplestore/ladybugdb/GraphSchema.py`, `GraphSchemaBuilder.py`):
-- Maps each OWL class to a LadybugDB node table (`CREATE NODE TABLE`)
-- Maps each OWL ObjectProperty to a relationship table (`CREATE REL TABLE`)
-- A `Resource` fallback table captures entities whose type is not in the ontology
-- DDL is generated as Cypher statements and executed at table creation time
+**Two write modes**, selected per domain in **Settings → Graph DB**:
 
-**UC Volume Sync** (`src/back/core/triplestore/ladybugdb/GraphSyncService.py`):
-- **After the Digital Twin build**: the local `.lbug` directory is archived into a `tar.gz` and uploaded to the UC Volume at `domains/{folder}/V{version}/ontobricks_{name}_V{version}.lbug.tar.gz`
-- On **domain load**: the archive is downloaded and extracted to `/tmp`, restoring the graph
-- Archive path: `/Volumes/{cat}/{sch}/{vol}/domains/{folder}/V{version}/ontobricks_{name}_V{version}.lbug.tar.gz`
+- `app_managed` (default) — the FastAPI app streams warehouse rows in `fetchmany` batches and ingests them via `COPY FROM STDIN` into a per-batch temp table followed by `INSERT … ON CONFLICT DO NOTHING`.
+- `managed_synced` — Databricks Lakeflow keeps a Postgres synced table (`g_<dom>_v<n>_sync`) in lock-step with the R2RML Delta view. The app only orchestrates (`SyncedTableManager.ensure` + `trigger_and_wait`); a writable companion table (`g_<dom>_v<n>__app`) absorbs reasoning / cohort writes; readers see both via a UNION view (`g_<dom>_v<n>`). See `docs/graphdb-integration.md §9` for the full architecture.
 
-**Query Translation:**
-- All named query methods (stats, type distribution, BFS traversal, etc.) are implemented natively in Cypher instead of SQL
-- A `_translate_conditions` helper converts simple SQL conditions (equality, LIKE patterns) to Cypher equivalents
-- `execute_query()` raises `NotImplementedError` since raw SQL is not supported
+**Adding a new engine** — copy `src/back/core/graphdb/_starter_kit/ExampleStore.py`, implement the `GraphDBBackend` contract, register the engine key in `GraphDBFactory`, and add it to `ALLOWED_GRAPH_ENGINES`. Pure-SQL engines inherit the named-query defaults from `TripleStoreBackend`; non-SQL engines (Cypher / Gremlin / SPARQL stores) override the relevant methods and may flip `supports_cypher` to re-enable the corresponding reasoning paths.
 
 ---
 
@@ -852,11 +832,11 @@ OntoBricks includes a **multi-phase reasoning engine** (`src/back/core/reasoning
    │ (OWL 2 RL)│           │  Rules    │           │ Reasoning │
    └─────┬─────┘           └─────┬─────┘           └─────┬─────┘
          │                       │                       │
-   owlrl library           SWRLEngine              TripleStore-
-   DeductiveClosure        ├─ SQL translator       Backend methods
-   (OWLRL_Semantics)       └─ Cypher translator    ├─ transitive_closure
-         │                       │                 ├─ symmetric_expand
-         ▼                       ▼                 └─ shortest_path
+   owlrl library           SWRLEngine              GraphDBBackend
+   DeductiveClosure        └─ SQL translator       methods
+   (OWLRL_Semantics)              │                ├─ transitive_closure
+         │                        │                ├─ symmetric_expand
+         ▼                        ▼                └─ shortest_path
    InferredTriple[]        RuleViolation[]               │
                            InferredTriple[]               ▼
                                                    InferredTriple[]
@@ -866,9 +846,9 @@ OntoBricks includes a **multi-phase reasoning engine** (`src/back/core/reasoning
                         ┌───────────────┐        ┌──────────────┐
                         │ Phase 4       │        │ Materialize  │
                         │ Constraints   │        │ (optional)   │
-                        │ (Cypher/SQL)  │        │ Write back   │
-                        └───────────────┘        │ to store     │
-                                                 └──────────────┘
+                        │ (skipped on   │        │ Write back   │
+                        │  SQL engines) │        │ to graph DB  │
+                        └───────────────┘        └──────────────┘
 ```
 
 ### Phase 1: T-Box Reasoning — OWL 2 RL Profile
@@ -907,20 +887,18 @@ Antecedent → Consequent
 ```
 Where atoms are class assertions (`Person(?x)`) or property assertions (`worksIn(?x, ?y)`).
 
-**Implementation** (`src/back/core/reasoning/SWRLEngine.py`, `SWRLSQLTranslator.py`, `SWRLCypherTranslator.py`):
+**Implementation** (`src/back/core/reasoning/SWRLEngine.py`, `SWRLSQLTranslator.py`):
 
 | Component | File | Role |
 |-----------|------|------|
-| `SWRLEngine` | `SWRLEngine.py` | Orchestrator — selects translator, executes rules, collects results |
+| `SWRLEngine` | `SWRLEngine.py` | Orchestrator — executes rules, collects results |
 | `SWRLSQLTranslator` | `SWRLSQLTranslator.py` | Compiles SWRL atoms into SQL with multi-join + `NOT EXISTS` for violation detection |
-| `SWRLFlatCypherTranslator` | `SWRLFlatCypherTranslator.py` | Compiles to Cypher for LadybugDB flat store (single `Triple` node table) |
-| `SWRLCypherTranslator` | `SWRLCypherTranslator.py` | Compiles to Cypher using the ontology-derived graph schema (typed node/rel tables) |
 
 **Execution modes:**
 - **Violation detection**: Finds instances where the antecedent holds but the consequent does not (generates `NOT EXISTS` subqueries)
 - **Materialization**: Inserts inferred consequent triples into the store (generates `INSERT` statements)
 
-**Backend dispatch**: The engine inspects the store instance type (`DeltaTripleStore` → SQL, `LadybugFlatStore` → flat Cypher, `LadybugGraphStore` → graph-schema Cypher) and selects the appropriate translator.
+**Backend dispatch**: All currently shipped backends are SQL — `DeltaTripleStore` (Spark SQL on the SQL Warehouse) and `LakebaseFlatStore` (Postgres SQL). The engine therefore always uses `SWRLSQLTranslator`. The capability flags (`supports_cypher`, `query_dialect`) on `GraphDBBackend` reserve the slot for a future Cypher / Gremlin engine; the matching translator can be plugged in without touching `SWRLEngine`.
 
 **URI resolution**: The engine builds a lowercase-name → URI map from the ontology, normalizing property URIs to the data namespace used by R2RML so that SWRL atom names match the predicates stored in the triple store.
 
@@ -931,18 +909,15 @@ Graph reasoning leverages **OWL property characteristics** to perform structural
 **Transitive closure** (`owl:TransitiveProperty`):
 - For properties like `partOf`, `subRegionOf`, or `reportsTo`
 - Discovers indirect relationships not explicitly asserted (if A partOf B and B partOf C, infers A partOf C)
-- **Delta**: SQL recursive CTE with depth limit
-- **LadybugDB**: Cypher variable-length path patterns `[:REL*2..N acyclic]`
+- **Delta** & **Lakebase**: SQL recursive CTE with depth limit
 
 **Symmetric expansion** (`owl:SymmetricProperty`):
 - For properties like `adjacentTo`, `siblingOf`, or `marriedTo`
 - For every `(a, P, b)` where `(b, P, a)` is missing, adds the inverse edge
-- **Delta**: SQL `NOT EXISTS` anti-join
-- **LadybugDB**: Cypher `NOT EXISTS` subquery
+- **Delta** & **Lakebase**: SQL `NOT EXISTS` anti-join
 
-**Shortest path** (LadybugDB only):
-- Uses Cypher's native `SHORTEST` algorithm
-- Not available on Delta (too expensive in SQL)
+**Shortest path**:
+- Currently SQL-only via BFS-bounded recursive CTE on the active graph engine. A native `SHORTEST` implementation can be re-enabled by a future Cypher / Gremlin engine through `GraphDBBackend`.
 
 ### Phase 4: Constraint Checking
 
@@ -960,7 +935,7 @@ Validates instance data in the triple store against formal ontology constraints:
 | Require labels | Global rule | Every typed entity has an `rdfs:label` |
 
 **Execution**:
-- On **LadybugDB**: Constraint checks run as Cypher queries via `ReasoningService`
+- On Cypher-capable engines (none currently shipped): constraint checks would run as Cypher queries via `ReasoningService`. On the SQL-based engines that ship today the constraint phase short-circuits with a `skipped` reason.
 - On **Delta**: Quality checks run as SQL queries via the Digital Twin quality pipeline
 
 ### Reasoning Data Model
@@ -976,7 +951,7 @@ All reasoning phases produce standardized output via three dataclasses (`src/bac
 ### Materialization
 
 Inferred triples from any phase can be **materialized** (written back) to the triple store:
-- `ReasoningService.materialize_inferred()` inserts into the active backend (Delta or LadybugDB)
+- `ReasoningService.materialize_inferred()` inserts into the active Graph DB engine (Lakebase) and into the Delta view
 - `ReasoningService.materialize_to_delta()` provides a static method for Delta-specific materialization with table creation and data replacement
 
 ### Key Files
@@ -985,11 +960,11 @@ Inferred triples from any phase can be **materialized** (written back) to the tr
 |------|---------|
 | `src/back/core/reasoning/ReasoningService.py` | `ReasoningService` — orchestrates all phases |
 | `src/back/core/reasoning/OWLRLReasoner.py` | `OWLRLReasoner` — OWL 2 RL deductive closure |
-| `src/back/core/reasoning/SWRLEngine.py` | `SWRLEngine` — SWRL rule orchestration and backend dispatch |
-| `src/back/core/reasoning/SWRLSQLTranslator.py` | `SWRLSQLTranslator` — SWRL → Spark SQL compilation |
-| `src/back/core/reasoning/SWRLCypherTranslator.py` | `SWRLCypherTranslator` / `SWRLFlatCypherTranslator` — SWRL → Cypher compilation |
+| `src/back/core/reasoning/SWRLEngine.py` | `SWRLEngine` — SWRL rule orchestration |
+| `src/back/core/reasoning/SWRLSQLTranslator.py` | `SWRLSQLTranslator` — SWRL → Spark / Postgres SQL compilation |
 | `src/back/core/reasoning/models.py` | `InferredTriple`, `RuleViolation`, `ReasoningResult` dataclasses |
-| `src/back/core/triplestore/TripleStoreBackend.py` | Graph reasoning primitives: `transitive_closure()`, `symmetric_expand()`, `shortest_path()` |
+| `src/back/core/triplestore/TripleStoreBackend.py` | Delta-side graph reasoning primitives |
+| `src/back/core/graphdb/GraphDBBackend.py` | Graph DB primitives: `transitive_closure()`, `symmetric_expand()`, `shortest_path()` |
 
 ---
 
@@ -1101,7 +1076,7 @@ Shapes are organized into six data quality categories:
 | RDFLib | 7.0+ | RDF/OWL operations |
 | owlrl | 7.0+ | OWL 2 RL forward-chaining reasoner (deductive closure on RDFLib graphs) |
 | PySHACL | 0.26+ | W3C SHACL validator for RDFLib graphs (data quality shapes validation) |
-| real_ladybug | 0.1+ | LadybugDB embedded graph database (Cypher-based triple store backend) |
+| psycopg | 3.2+ | Postgres driver for the Lakebase Graph DB engine |
 | Databricks SQL Connector | 3.0+ | Database connectivity |
 | MLflow | 2.19+ | Agent tracing, evaluation, and Databricks Agent Framework |
 | FastMCP | 2.3+ | MCP server SDK for LLM tool integration |
@@ -1427,7 +1402,7 @@ See [API Documentation](api.md) for complete endpoint reference.
 5. **Custom Visualizations**: Extend Sigma.js knowledge graph in query template
 6. **Authentication Providers**: Add new auth methods in `DatabricksClient`
 7. **OntoViz Extensions**: Add new entity/relationship types, custom rendering
-8. **Triple Store Backends**: Implement `TripleStoreBackend` in `src/back/core/triplestore/` — two backends are already available (Delta, LadybugDB)
+8. **Graph DB Engines**: Implement `GraphDBBackend` in `src/back/core/graphdb/` (Lakebase Postgres ships today; the `_starter_kit/ExampleStore.py` template plus `GraphDBFactory` make it straightforward to add Neo4j, Memgraph, or other engines). The Delta-backed `TripleStoreBackend` is also extensible for new SQL views.
 9. **Theming**: Modify OntoViz CSS variables for custom themes
 10. **SWRL Built-ins**: Extend the SWRL engine (`src/back/core/reasoning/SWRLEngine.py`) with additional built-in atoms beyond class and property assertions (e.g., math, string, comparison built-ins)
 11. **Reasoning Profiles**: Add new reasoning profiles beyond OWL 2 RL (e.g., OWL 2 EL) by implementing alternative reasoner classes in `src/back/core/reasoning/`
@@ -1455,7 +1430,7 @@ See [API Documentation](api.md) for complete endpoint reference.
 - **RDFLib Documentation**: https://rdflib.readthedocs.io/
 - **owlrl (OWL 2 RL Reasoner)**: https://owl-rl.readthedocs.io/
 - **PySHACL**: https://github.com/RDFLib/pySHACL
-- **LadybugDB (real_ladybug)**: Embedded graph database with Cypher support — https://pypi.org/project/real-ladybug/
+- **Lakebase Postgres**: Databricks-hosted Postgres for OLTP / Apps — https://docs.databricks.com/aws/en/oltp/
 - **SANSA Stack (inspiration)**: https://github.com/SANSA-Stack
 - **Databricks SQL Connector**: https://docs.databricks.com/dev-tools/python-sql-connector.html
 
@@ -2382,227 +2357,3 @@ MIT License - OntoViz is open source and can be used in commercial projects.
 
 - [User Guide](user-guide.md) — consolidated usage guide
 - [Getting Started](get-started.md) — installation and configuration
-
----
-
-### Incremental LadybugDB Sync — Design Spec
-
-**Date:** 2026-04-02
-**Scope:** Source data changes only (ontology/mapping changes still trigger full rebuilds)
-
-### Problem
-
-The Digital Twin build always performs a full rebuild: drops the entire LadybugDB
-graph, re-reads all triples from the Unity Catalog VIEW, and re-inserts everything.
-For large knowledge graphs this is expensive in SQL Warehouse compute, wall-clock
-time, and graph-DB write I/O — even when only a handful of source rows changed.
-
-### Solution Overview
-
-A two-phase incremental sync that:
-
-1. **Version Gate** — cheaply detects whether any source Delta table has changed
-   since the last build. If nothing changed, the build is skipped entirely.
-2. **Server-Side Diff via Delta Snapshot Table** — when changes are detected,
-   computes the diff (additions + removals) server-side on the SQL Warehouse
-   using `EXCEPT` queries against a persisted snapshot, then applies only the
-   delta to LadybugDB.
-
-#### Flow
-
-```
-Sync triggered (manual or scheduled)
-        │
-        ▼
-Phase 0: Mode Check
-   ontology/mapping changed since last build?
-   ──yes──▶ FULL rebuild (existing behavior)
-        │ no
-        ▼
-Phase 1: Version Gate
-   DESCRIBE HISTORY on each source table
-   compare versions with stored versions
-   ──all match──▶ SKIP (nothing changed)
-        │ at least one changed
-        ▼
-Phase 2: Refresh VIEW
-   CREATE OR REPLACE VIEW (same as today)
-        │
-        ▼
-Phase 3: Server-Side Diff via SQL
-   Snapshot table exists?
-   ──no──▶ first build → full load + create snapshot
-   ──yes──▶ compute diff via EXCEPT
-        │ diff computed
-        ▼
-Phase 4: Apply Delta to LadybugDB
-   Insert new triples
-   Delete removed triples
-        │
-        ▼
-Phase 5: Update State
-   Overwrite snapshot with current VIEW
-   Store new source table versions
-   Stamp last_build timestamp
-```
-
-### Detailed Design
-
-#### 1. Snapshot Table
-
-A managed Delta table in the same catalog/schema as the VIEW — both of which
-are always the registry `catalog.schema` for the active domain:
-
-- **Name:** `_ob_snapshot_{safe_domain}_v{version}` (derived; never stored)
-- **Schema:** `(subject STRING, predicate STRING, object STRING)`
-- **Lifecycle:** Created on first incremental build; dropped on domain delete
-  or forced full rebuild.
-
-Diff queries (executed server-side on SQL Warehouse):
-
-```sql
--- Triples to ADD
-SELECT subject, predicate, object
-FROM {view_table}
-EXCEPT
-SELECT subject, predicate, object
-FROM {snapshot_table}
-
--- Triples to REMOVE
-SELECT subject, predicate, object
-FROM {snapshot_table}
-EXCEPT
-SELECT subject, predicate, object
-FROM {view_table}
-```
-
-Snapshot refresh after successful apply:
-
-```sql
-CREATE OR REPLACE TABLE {snapshot_table}
-AS SELECT subject, predicate, object FROM {view_table}
-```
-
-#### 2. Source Table Version Tracking
-
-Extract the list of source tables from R2RML entity mappings (`sql_query` fields).
-For each source table:
-
-```sql
-DESCRIBE HISTORY {table} LIMIT 1
-```
-
-Returns the latest `version` number (monotonically increasing). Stored as:
-
-```json
-"domain.triplestore.source_versions": {
-  "catalog.schema.table_a": 42,
-  "catalog.schema.table_b": 17
-}
-```
-
-The snapshot table name is not stored; it is computed on the fly from the
-registry catalog/schema, the domain name and the current version
-(`{registry.catalog}.{registry.schema}._ob_snapshot_<domain>_v<version>`).
-
-#### 3. New Components
-
-##### `src/back/core/triplestore/IncrementalBuildService.py`
-
-```python
-class IncrementalBuildService:
-    """Manages incremental sync: version gate, diff, and apply."""
-
-    def __init__(self, client, settings)
-
-    def extract_source_tables(self, entity_mappings, relationship_mappings) -> list[str]
-    def check_source_versions(self, source_tables, stored_versions) -> (changed, new_versions)
-    def snapshot_table_name(self, project_name, delta_cfg) -> str
-    def snapshot_exists(self, snapshot_table) -> bool
-    def compute_diff(self, view_table, snapshot_table) -> (to_add, to_remove)
-    def refresh_snapshot(self, view_table, snapshot_table) -> None
-    def create_snapshot(self, view_table, snapshot_table) -> None
-    def drop_snapshot(self, snapshot_table) -> None
-```
-
-##### New abstract method on `TripleStoreBackend`
-
-```python
-def delete_triples(self, table_name, triples, batch_size=500, on_progress=None) -> int
-```
-
-**Flat model:** `MATCH (t:Node {subject: ..., predicate: ..., object: ...}) DELETE t`
-**Graph model:** Classify triples (same as insert), then:
-- Node removals: `MATCH (n:Table {uri: '...'}) DETACH DELETE n`
-- Relationship removals: `MATCH (a)-[r:RelTable]->(b) WHERE a.uri = ... AND b.uri = ... DELETE r`
-- Attribute removals: `MATCH (n:Table {uri: '...'}) SET n.col = NULL`
-
-#### 4. Modified Files
-
-- **`src/back/objects/session/DomainSession.py`** — add `source_versions` to `domain.triplestore`
-  in the empty domain template and expose `snapshot_table`/`delta` as computed read-only
-  properties derived from the registry.
-- **`TripleStoreBackend.py`** — add abstract `delete_triples` method.
-- **`LadybugFlatStore.py`** — implement `delete_triples` for flat model.
-- **`LadybugGraphStore.py`** — implement `delete_triples` for graph model.
-- **`src/api/routers/internal/dtwin.py`** — `start_triplestore_sync` gains `incremental` mode (delegating to `IncrementalBuildService` when conditions are met); extend `/sync/status`, `/sync/changes`, and `/sync/dt-existence` with incremental metadata.
-- **`src/back/objects/registry/scheduler.py`** — `_run_scheduled_build` uses incremental path.
-- **`src/front/templates/partials/dtwin/_query_sync.html`** — add snapshot info in Triple-Store Digital Twin card.
-- **`src/front/static/query/js/query-sync.js`** — render snapshot existence/status.
-
-#### 5. Sync Options (UI)
-
-The existing "Replace existing data" checkbox is replaced by a mode selector:
-
-- **Incremental** (default) — version gate + diff
-- **Full rebuild** — drop + recreate (existing behavior, equivalent to
-  `drop_existing=True`)
-
-#### 6. Fallback Rules
-
-Incremental sync gracefully falls back to full rebuild when:
-
-- Ontology or mappings changed since last build
-- Snapshot table doesn't exist (first build)
-- User explicitly requests full rebuild
-- Diff exceeds a threshold (>80% of total triples changed)
-- Any error during incremental path
-
-#### 7. Digital Twin Info Page
-
-The Triple-Store Digital Twin card gains a new line below the VIEW name:
-
-```
-Unity Catalog VIEW
-  catalog.schema.view_name           ✓ Exists
-
-Incremental Snapshot
-  catalog.schema._ob_snapshot_xxx    ✓ Exists  |  [Drop]
-```
-
-The `[Drop]` button forces the next build to be a full rebuild.
-
-#### 8. Build Result Enrichment
-
-The sync result includes incremental metadata:
-
-```json
-{
-  "triple_count": 50000,
-  "build_mode": "incremental",
-  "diff": { "added": 120, "removed": 15 },
-  "skipped_reason": null,
-  "duration_seconds": 4.2
-}
-```
-
-Or when skipped:
-
-```json
-{
-  "triple_count": 0,
-  "build_mode": "skipped",
-  "skipped_reason": "No source table changes detected",
-  "duration_seconds": 0.8
-}
-```

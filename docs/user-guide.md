@@ -169,7 +169,7 @@ Antecedent: Person(?x) ∧ worksIn(?x, ?d) ∧ manages(?y, ?d)
 Consequent: hasManager(?x, ?y)
 ```
 
-Rules are compiled to **SQL** (Delta backend) or **Cypher** (LadybugDB backend) for execution in the Reasoning pipeline.
+Rules are compiled to **Spark/Postgres SQL** for execution in the Reasoning pipeline. The capability flags on `GraphDBBackend` reserve a slot for a future Cypher / Gremlin engine.
 
 #### Property Constraints
 
@@ -434,8 +434,8 @@ Navigate to the **Digital Twin** page by clicking "Digital Twin" in the navigati
 Click **Status** in the sidebar to manage your triple store:
 
 - **Readiness Status**: Shows whether Ontology and mappings (including attribute mappings) are all complete
-- **Synchronize**: Generates all triples from your mappings and writes them to the configured triple store backend (Delta or LadybugDB)
-- **Last Updated**: When the table contains data, the status area displays the last modification date and time (for Delta from Unity Catalog metadata; for LadybugDB from the local file timestamp)
+- **Synchronize**: Generates all triples from your mappings and writes them to the Delta view in Unity Catalog and to the configured Graph DB engine (Lakebase Postgres)
+- **Last Updated**: When the table contains data, the status area displays the last modification date and time (for Delta from Unity Catalog metadata; for Lakebase from the Postgres `count_triples` + table metadata)
 
 ### Quality (Sidebar)
 
@@ -622,22 +622,22 @@ The **Global** tab in the Domain Information section contains the main domain se
 
 | Field | Description |
 |-------|-------------|
-| **Backend** | Select the triple store engine: **Delta** (Databricks SQL Warehouse) or **LadybugDB** (embedded graph database). |
-| **Triple-Store** | *(Delta only)* Read-only. The Delta VIEW is always created in the domain's registry `catalog.schema`, and its name is derived as `triplestore_<domain>_V<version>`. |
-| **Graph Name** | *(LadybugDB)* Logical name for the embedded graph database (defaults to domain name). |
+| **Backend** | Select the materialization target: **Delta view** (always created), and the active **Graph DB engine** (currently Lakebase Postgres). |
+| **Triple-Store** | Read-only. The Delta VIEW is always created in the domain's registry `catalog.schema`, and its name is derived as `triplestore_<domain>_V<version>`. |
+| **Graph DB table** | Read-only. For Lakebase, the flat triple table name is derived as `g_<domain>_v<version>` in the configured Postgres schema (default `ontobricks_graph`). |
 
-When you **commit** the domain name (blur the field or trigger `change`) or change the **Version**, the Triple Store, snapshot table FQN, and local Ladybug path fields are **recomputed** so they match the naming rules the server will use on save — without waiting for a round-trip.
+When you **commit** the domain name (blur the field or trigger `change`) or change the **Version**, the Triple Store FQN and Graph DB table name are **recomputed** so they match the naming rules the server will use on save — without waiting for a round-trip.
 
 **Backend details:**
 
 | Backend | Storage | Sync | Best for |
 |---------|---------|------|----------|
-| **Delta** | Databricks Delta table via SQL Warehouse | Immediate (SQL) | Production workloads with Unity Catalog governance |
-| **LadybugDB** | Local disk (`/tmp`) with automatic UC Volume sync | Automatic after Digital Twin build | Lightweight demos and local development without a SQL Warehouse |
+| **Delta view** | Databricks Delta view via SQL Warehouse | Immediate (SQL `CREATE OR REPLACE VIEW`) | Unity Catalog governance, governance-controlled queries, lineage |
+| **Lakebase Postgres** | Flat `(subject, predicate, object)` table on the App-bound Lakebase instance | App-managed (`COPY FROM STDIN`) or managed-synced (Lakeflow) | Low-latency reads from the FastAPI process, reasoning, BFS / cohort builds |
 
 **Performance:**
-- **Delta** tables are created with **Liquid Clustering** (`CLUSTER BY (predicate, subject)`), which co-locates rows by predicate and subject for faster query filtering. After each build, an `OPTIMIZE` command is automatically executed to compact data files and apply the clustering layout.
-- **LadybugDB** stores data in an embedded graph database using Cypher. When the domain has an ontology loaded, LadybugDB uses a **true graph model** where each OWL class becomes a node table and each object property becomes a relationship table. Graph data is stored locally at `/tmp` and automatically archived to your registry UC Volume after each Digital Twin build (and restored on domain load).
+- **Delta** views are backed by R2RML SQL that runs on the SQL Warehouse with **Liquid Clustering** (`CLUSTER BY (predicate, subject)`) for the persisted snapshot, co-locating rows by predicate and subject for faster query filtering. After each build, an `OPTIMIZE` command is automatically executed to compact data files and apply the clustering layout.
+- **Lakebase** stores triples in Postgres flat tables. Two modes are available: `app_managed` (the app streams batches via `COPY FROM STDIN`, idempotent on `(subject, predicate, object)`) and `managed_synced` (Databricks Lakeflow keeps a synced table in lock-step with the Delta view, while a writable companion table absorbs reasoning/cohort writes — the read view UNIONs both).
 
 ### Saving Domains
 
@@ -949,14 +949,15 @@ See the [MCP Server documentation](mcp.md) for full details including local usag
 - Use Auto-Map → Re-Assign Missing Attributes to fix incomplete attribute mappings
 - Verify table and column names match
 
-### LadybugDB Graph Not Persisting
+### Lakebase Graph Empty After Restart
 
-**Problem**: LadybugDB data is lost after application restart
+**Problem**: Triples are missing from the Graph DB after the App restarts
 
 **Solutions**:
-- The LadybugDB graph is automatically archived to the registry UC Volume after each Digital Twin build — ensure your build completes successfully
-- After loading a domain, the graph archive is automatically restored from the registry
-- If the registry is not configured, LadybugDB data lives only in `/tmp` and will not survive a restart
+- Lakebase Postgres is the source of truth for the graph engine — verify the App is bound to the Lakebase instance (`PGHOST` / `PGDATABASE` env vars set by the Apps runtime)
+- If the Lakebase instance was paused or scaled to zero, the connection layer retries on `SQLSTATE 57P03`. Wait a few seconds and re-trigger the build.
+- Re-run the Digital Twin sync — the build is idempotent (`INSERT … ON CONFLICT DO NOTHING`)
+- For `managed_synced` mode, check the Lakeflow synced-table status under **Settings → Graph DB**
 
 ### Design Changes Not Saving
 
@@ -1174,7 +1175,7 @@ If all checks pass:
 
 > **Note**: If the triple store table already exists, you can choose to **drop and recreate** it or append to the existing data.
 
-> **Triple Store Backend**: OntoBricks supports two backends — **Delta** (SQL Warehouse, recommended for production) and **LadybugDB** (embedded graph, ideal for development/testing). Configure the backend in Domain > Information > Triple Store settings.
+> **Triple Store Backend**: OntoBricks always materializes a Delta view in Unity Catalog (governance + lineage) and a flat triple table in the active Graph DB engine (Lakebase Postgres today). The Graph DB engine is selectable in **Settings → Graph DB**.
 
 ---
 
@@ -1210,7 +1211,7 @@ Define fine-grained rules using the W3C SHACL standard (Ontology > Data Quality 
 | **sh:class** | Object must be of a specific type |
 | **sh:sparql** | Custom SPARQL-based rules (e.g., no orphans, unique IDs) |
 
-SHACL shapes are compiled to **Spark SQL** for Delta execution or evaluated **in-memory** against LadybugDB. Results show violations, pass rates, and per-entity details.
+SHACL shapes are compiled to **Spark SQL** for Delta execution and to **Postgres SQL** for the Lakebase Graph DB. Results show violations, pass rates, and per-entity details.
 
 1. Click **Run All Checks** to execute all applicable checks, or run individual checks.
 

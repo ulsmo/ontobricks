@@ -10,7 +10,7 @@ import threading
 import time
 from contextlib import contextmanager
 from databricks import sql
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from back.core.logging import get_logger
 from back.core.errors import ValidationError
@@ -145,6 +145,38 @@ class SQLWarehouse:
             logger.exception("Error executing query: %s", exc)
             raise
 
+    def iter_rows(
+        self, query: str, batch_size: int = 5000
+    ) -> Iterator[Dict[str, Any]]:
+        """Stream *query* results as dict rows in fixed-size ``fetchmany`` batches.
+
+        Used by the Digital Twin build pipeline to keep large result sets
+        (full graph rebuild, EXCEPT diffs) from being materialized in the
+        FastAPI process: the cursor stays open on the warehouse side and the
+        app yields one batch at a time.
+
+        The borrowed connection is held for the lifetime of the generator so
+        that early termination (``GeneratorExit``) still returns it to the
+        pool. Broken connections are discarded by ``_borrow``.
+        """
+        self._require_warehouse()
+        if batch_size <= 0:
+            raise ValidationError("batch_size must be positive")
+        try:
+            with self._borrow() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query)
+                    columns = [desc[0] for desc in cur.description]
+                    while True:
+                        rows = cur.fetchmany(batch_size)
+                        if not rows:
+                            break
+                        for row in rows:
+                            yield dict(zip(columns, row))
+        except Exception as exc:
+            logger.exception("Error streaming query: %s", exc)
+            raise
+
     def execute_statement(self, statement: str) -> bool:
         """Execute a DDL/DML *statement* without returning results."""
         self._require_warehouse()
@@ -152,6 +184,17 @@ class SQLWarehouse:
             with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(statement)
+                # UC DDL must be committed before control-plane APIs (e.g. synced
+                # database tables) can resolve catalog.schema in the metastore.
+                commit = getattr(conn, "commit", None)
+                if callable(commit):
+                    try:
+                        commit()
+                    except Exception as commit_exc:  # noqa: BLE001
+                        logger.debug(
+                            "Ignoring commit() after DDL (autocommit driver): %s",
+                            commit_exc,
+                        )
             return True
         except Exception as exc:
             logger.exception("Error executing statement: %s", exc)

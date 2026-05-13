@@ -1,7 +1,10 @@
 """SWRL rule execution engine.
 
-Selects the appropriate translator (SQL or Cypher) based on the
-triple-store backend and executes inference (producing inferred triples).
+Translates SWRL rules to SQL via the backend-provided translator and
+executes inference (producing inferred triples) against the active
+triple store.  All currently supported backends are SQL-based; a
+future Cypher / Gremlin engine would supply its own translator via
+:meth:`GraphDBBackend.get_query_translator`.
 
 Violation detection for SWRL rules is handled separately by the
 Data Quality runner (see ``run_sql_checks`` / ``run_graph_checks``
@@ -48,9 +51,6 @@ class SWRLEngine:
         """
         t0 = time.time()
         result = ReasoningResult()
-        is_graph = self._is_graph_backend(store)
-        is_cypher_store = self._is_cypher_backend(store)
-        uses_cypher = is_graph or is_cypher_store
 
         base_uri = self._ontology.get("base_uri", "")
         uri_map = self._build_uri_map()
@@ -82,7 +82,6 @@ class SWRLEngine:
                     table_name,
                     params,
                     name,
-                    uses_cypher,
                     result,
                     inference_limit=inference_limit,
                 )
@@ -93,7 +92,6 @@ class SWRLEngine:
                         table_name,
                         params,
                         name,
-                        uses_cypher,
                         result,
                     )
             except Exception as e:
@@ -126,15 +124,13 @@ class SWRLEngine:
         table_name,
         params,
         rule_name,
-        uses_cypher,
         result,
         inference_limit: Optional[int] = None,
     ):
         """Execute inference SELECT for a single rule."""
-        if uses_cypher:
-            query = translator.build_inference_query(params)
-        else:
-            query = translator.build_inference_sql(table_name, params)
+        query = translator.build_inference_sql(
+            store.sql_table_reference(table_name), params
+        )
 
         if not query:
             logger.warning(
@@ -147,33 +143,18 @@ class SWRLEngine:
 
         t_rule = time.time()
         count = 0
-        if uses_cypher:
-            conn = store.get_connection()
-            r = conn.execute(query)
-            for row in r:
-                result.inferred_triples.append(
-                    InferredTriple(
-                        subject=str(row[0]) if row[0] else "",
-                        predicate=str(row[1]) if row[1] else "",
-                        object=str(row[2]) if row[2] else "",
-                        provenance=f"swrl:{rule_name}",
-                        rule_name=rule_name,
-                    )
+        rows = store.execute_query(query) or []
+        for row in rows:
+            result.inferred_triples.append(
+                InferredTriple(
+                    subject=row.get("subject", ""),
+                    predicate=row.get("predicate", ""),
+                    object=row.get("object", ""),
+                    provenance=f"swrl:{rule_name}",
+                    rule_name=rule_name,
                 )
-                count += 1
-        else:
-            rows = store.execute_query(query) or []
-            for row in rows:
-                result.inferred_triples.append(
-                    InferredTriple(
-                        subject=row.get("subject", ""),
-                        predicate=row.get("predicate", ""),
-                        object=row.get("object", ""),
-                        provenance=f"swrl:{rule_name}",
-                        rule_name=rule_name,
-                    )
-                )
-                count += 1
+            )
+            count += 1
         logger.info(
             "SWRL inference '%s': %d triples (%.2fs)",
             rule_name,
@@ -182,41 +163,28 @@ class SWRLEngine:
         )
 
     def _materialize_rule(
-        self, translator, store, table_name, params, rule_name, uses_cypher, result
+        self, translator, store, table_name, params, rule_name, result
     ):
         """Execute materialisation for a single rule."""
         try:
             t_rule = time.time()
-            if uses_cypher:
-                query = translator.build_materialization_query(params)
-                if query:
-                    conn = store.get_connection()
-                    conn.execute(query)
-                    result.inferred_triples.append(
-                        InferredTriple(
-                            subject="(batch)",
-                            predicate="swrl:materialized",
-                            object=rule_name,
-                            provenance=f"swrl:{rule_name}",
-                            rule_name=rule_name,
-                        )
+            sql = translator.build_materialization_sql(
+                store.sql_table_reference(table_name), params
+            )
+            if sql:
+                for stmt in sql.split(";\n"):
+                    stmt = stmt.strip()
+                    if stmt:
+                        store.execute_query(stmt)
+                result.inferred_triples.append(
+                    InferredTriple(
+                        subject="(batch)",
+                        predicate="swrl:materialized",
+                        object=rule_name,
+                        provenance=f"swrl:{rule_name}",
+                        rule_name=rule_name,
                     )
-            else:
-                sql = translator.build_materialization_sql(table_name, params)
-                if sql:
-                    for stmt in sql.split(";\n"):
-                        stmt = stmt.strip()
-                        if stmt:
-                            store.execute_query(stmt)
-                    result.inferred_triples.append(
-                        InferredTriple(
-                            subject="(batch)",
-                            predicate="swrl:materialized",
-                            object=rule_name,
-                            provenance=f"swrl:{rule_name}",
-                            rule_name=rule_name,
-                        )
-                    )
+                )
             logger.info("SWRL materialise '%s': %.2fs", rule_name, time.time() - t_rule)
         except Exception as e:
             logger.error("Materialisation for rule '%s' failed: %s", rule_name, e)
@@ -264,18 +232,12 @@ class SWRLEngine:
         return uri_map
 
     @staticmethod
-    def _is_cypher_backend(store) -> bool:
-        """True when the store executes SWRL via Cypher (graph-capable backend)."""
-        return GraphDBBackend.is_cypher_backend(store)
-
-    @staticmethod
-    def _is_graph_backend(store) -> bool:
-        """True when the store uses a typed graph schema for SWRL translation."""
-        return isinstance(store, GraphDBBackend) and store.supports_graph_model
-
-    @staticmethod
     def _get_translator(store, table_name: str = ""):
-        """Return the appropriate translator for the backend."""
+        """Return the SWRL→SQL translator for the backend.
+
+        Backends override :meth:`GraphDBBackend.get_query_translator` to plug
+        in their own translator (e.g. a future Cypher engine).
+        """
         if isinstance(store, GraphDBBackend):
             return store.get_query_translator(table_name)
         from back.core.reasoning.SWRLSQLTranslator import SWRLSQLTranslator

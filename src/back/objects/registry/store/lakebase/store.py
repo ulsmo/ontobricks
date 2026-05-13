@@ -104,8 +104,7 @@ def _require_psycopg():
     except ImportError as exc:  # pragma: no cover
         raise InfrastructureError(
             "psycopg is required for the Lakebase backend. Install with "
-            "``uv sync --extra lakebase`` (or ``pip install .[lakebase]``) or "
-            "set REGISTRY_BACKEND=volume."
+            "``uv sync --extra lakebase`` (or ``pip install .[lakebase]``)."
         ) from exc
     return psycopg, dict_row
 

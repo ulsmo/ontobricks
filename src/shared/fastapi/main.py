@@ -158,6 +158,12 @@ _PERM_ADMIN_ONLY_EXCEPTIONS = {
     "/settings/registry": {"GET"},
     "/settings/registry/domains": {"GET"},
     "/settings/registry/bridges": {"GET"},
+    # Graph DB engine is global; non-admins need read access so the Settings UI
+    # (and tab refresh) match persisted state. Writes remain POST + admin-only.
+    "/settings/graph-engine": {"GET"},
+    "/settings/graph-engine-config": {"GET"},
+    "/settings/graph-engine/lakebase-health": {"GET"},
+    "/settings/graph-engine/uc-catalogs": {"GET"},
 }
 
 # Routes that operate on a specific domain (the session's current domain).

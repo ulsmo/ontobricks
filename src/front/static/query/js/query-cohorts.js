@@ -3,7 +3,7 @@
  *
  * Owns the form state, debounced live counters, dry-run + materialise
  * round-trips, the four constraint primitives and the Materialise-targets
- * modal.  Stage 2 (NL agent) layers on top via the same JSON contract.
+ * modal.
  */
 const CohortModule = {
     // ---- internal state -------------------------------------------------
@@ -111,14 +111,13 @@ const CohortModule = {
     },
 
     _dataPropsForClass(classUri) {
-        const allData = (this.properties || []).filter(p =>
+        const clsName = this._classNameByUri(classUri || '');
+        const dataProps = (this.properties || []).filter(p =>
             !(p.type || p.kind || '').toLowerCase().includes('object')
         );
-        if (!classUri) return allData;
-        const className = this._classNameByUri(classUri);
-        if (!className) return allData;
-        const matched = allData.filter(p => !p.domain || p.domain === className);
-        return matched.length ? matched : allData;
+        if (!clsName) return dataProps;
+        const matched = dataProps.filter(p => (p.domain || '') === clsName);
+        return matched.length ? matched : dataProps;
     },
 
     _compatibleViaProperties(sourceUri, targetUri) {
@@ -979,7 +978,7 @@ const CohortModule = {
             const propSelect = `
                 <select class="form-select form-select-sm cohort-input cohort-compat-prop" data-idx="${i}">
                     <option value="">— property —</option>
-                    ${this._dataPropsForClass(this.rule.class_uri).map(p => {
+                    ${this._dataPropsForClass(this.rule.class_uri || '').map(p => {
                         const uri = p.uri || p.iri || p.id || '';
                         const lbl = p.label || p.name || uri;
                         return `<option value="${this._esc(uri)}" ${uri === cc.property ? 'selected' : ''}>${this._esc(lbl)}</option>`;
@@ -1745,16 +1744,16 @@ const CohortModule = {
                 (<code>${this._esc(this._localName(hops[collapsedAt].via) || '?')}</code>
                 → <code>${this._esc(this._localName(hops[collapsedAt].target_class) || '?')}</code>):
                 ${hops[collapsedAt].in_frontier === 0
-                    ? 'the starting frontier for this hop is empty — all members were eliminated before reaching it. Check the compatibility (Stage 3a) filters or the previous hop\'s <code>target_class</code>.'
+                    ? 'the starting frontier for this hop is empty — all members were eliminated before reaching it. Check the compatibility (Stage 3a) filters or the previous hop\'s target_class.'
                     : hops[collapsedAt].neighbours_raw === 0
-                    ? 'no neighbours found via this predicate. Check the predicate URI and whether your data actually uses it.'
-                    : (hops[collapsedAt].dropped_type === hops[collapsedAt].neighbours_raw
-                        ? "every neighbour was rejected by <code>target_class</code>. The hop's target entity URI probably doesn't match the URIs used in <code>rdf:type</code> triples."
-                        : (hops[collapsedAt].dropped_where === (hops[collapsedAt].neighbours_raw - hops[collapsedAt].dropped_type)
-                            ? 'every neighbour was rejected by the hop <code>where</code> filter. Check the property URI, the literal value (case / type), and the <code>allow_missing</code> flag.'
-                            : 'a mix of filters dropped every neighbour — open the rule JSON and confirm each filter against actual data.')
-                    )
-                }
+                        ? 'no neighbours found via this predicate. Check the predicate URI and whether your data actually uses it.'
+                        : (hops[collapsedAt].dropped_type === hops[collapsedAt].neighbours_raw
+                            ? "every neighbour was rejected by <code>target_class</code>. The hop's target entity URI probably doesn't match the URIs used in <code>rdf:type</code> triples."
+                            : (hops[collapsedAt].dropped_where === (hops[collapsedAt].neighbours_raw - hops[collapsedAt].dropped_type)
+                                ? 'every neighbour was rejected by the hop <code>where</code> filter. Check the property URI, the literal value (case / type), and the <code>allow_missing</code> flag.'
+                                : 'a mix of filters dropped every neighbour — open the rule JSON and confirm each filter against actual data.')
+                            )
+                    }
             </div>`
             : '';
         return `<div class="cohort-trace-link card mb-2">
@@ -1915,132 +1914,6 @@ const CohortModule = {
             applyBtn.addEventListener('click', onApply);
             modalEl.addEventListener('hidden.bs.modal', onHidden);
         });
-    },
-
-    // ---- Stage 2: NL agent ---------------------------------------------
-
-    async runAgent() {
-        const promptEl = document.getElementById('cohortAgentPrompt');
-        const btn = document.getElementById('cohortAgentRunBtn');
-        const replyEl = document.getElementById('cohortAgentReply');
-        const traceEl = document.getElementById('cohortAgentTraceBody');
-        if (!promptEl) return;
-        const prompt = (promptEl.value || '').trim();
-        if (!prompt) {
-            this._setStatus('Type a prompt for the agent first.', 'warn');
-            return;
-        }
-
-        const originalBtnHtml = btn ? btn.innerHTML : '';
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Thinking…';
-        }
-        if (replyEl) {
-            replyEl.classList.remove('d-none');
-            replyEl.className = 'small mt-2 text-muted';
-            replyEl.textContent = 'The agent is introspecting the ontology…';
-        }
-        if (traceEl) traceEl.innerHTML = '<em>Running…</em>';
-        this._setStatus('Running cohort agent…', 'info');
-
-        try {
-            const r = await fetch('/dtwin/cohorts/agent', {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt }),
-            });
-            if (!r.ok) {
-                const txt = await r.text();
-                throw new Error(`HTTP ${r.status}: ${txt.slice(0, 240)}`);
-            }
-            const data = await r.json();
-
-            this._renderAgentTrace(data);
-
-            if (data && data.rule) {
-                this._applyRuleFromAgent(data.rule);
-                if (replyEl) {
-                    replyEl.className = 'small mt-2 text-success';
-                    const md = (data.reply || 'Rule generated. Review the form, then save.').toString();
-                    replyEl.textContent = md;
-                }
-                this._setStatus(
-                    `Agent proposed rule "${data.rule.label || data.rule.id}". Review and save.`,
-                    'ok',
-                );
-            } else {
-                if (replyEl) {
-                    replyEl.className = 'small mt-2 text-warning';
-                    replyEl.textContent = (data && data.reply)
-                        || 'The agent did not produce a rule. Try rephrasing your request.';
-                }
-                this._setStatus('Agent returned no rule.', 'warn');
-            }
-        } catch (e) {
-            if (replyEl) {
-                replyEl.className = 'small mt-2 text-danger';
-                replyEl.textContent = `Agent failed: ${e.message || e}`;
-            }
-            if (traceEl) traceEl.innerHTML = '<em class="text-danger">Run failed.</em>';
-            this._setStatus('Agent failed. See banner.', 'err');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = originalBtnHtml || '<i class="bi bi-magic me-1"></i>Generate rule';
-            }
-        }
-    },
-
-    _renderAgentTrace(data) {
-        const traceEl = document.getElementById('cohortAgentTraceBody');
-        if (!traceEl) return;
-        const tools = (data && data.tools) || [];
-        const iters = (data && data.iterations) || 0;
-        const usage = (data && data.usage) || {};
-        if (!tools.length) {
-            traceEl.innerHTML = `<em>No tool calls (iterations: ${iters}).</em>`;
-            return;
-        }
-        const rows = tools.map((t, i) => `
-            <li>
-                <span class="text-muted">${i + 1}.</span>
-                <code>${this._esc(t.name || '?')}</code>
-                <span class="text-muted">${t.duration_ms || 0} ms</span>
-            </li>
-        `).join('');
-        const tokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
-        traceEl.innerHTML = `
-            <div class="mb-1">
-                ${tools.length} tool call${tools.length === 1 ? '' : 's'}
-                · ${iters} iteration${iters === 1 ? '' : 's'}
-                · ${tokens} tokens
-            </div>
-            <ol class="mb-0 ps-3">${rows}</ol>
-        `;
-    },
-
-    _applyRuleFromAgent(rule) {
-        if (!rule || typeof rule !== 'object') return;
-        this.activeRuleId = null;
-        this.rule = JSON.parse(JSON.stringify(rule));
-        if (!this.rule.output) this.rule.output = { graph: true };
-        if (!this.rule.min_size || this.rule.min_size < 2) this.rule.min_size = 2;
-        if (!this.rule.links_combine) this.rule.links_combine = 'any';
-        if (!this.rule.group_type) this.rule.group_type = 'connected';
-        // The agent has historically returned labels like "Exempt staffing
-        // pool" — coerce to the camelCase form the form now enforces, and
-        // mirror it onto ``id`` so downstream lookups stay consistent.
-        const camel = this._toCamelCase(this.rule.label || this.rule.id || '');
-        if (camel) {
-            this.rule.label = camel;
-            this.rule.id = camel;
-        }
-        this.dirty = true;
-        this._hydrateForm();
-        this._renderRulesList();
-        this._showBuildTab();
     },
 
     _showBuildTab() {

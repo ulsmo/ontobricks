@@ -104,7 +104,7 @@ back/core/
 ├── logging/          <- LogManager, setup_logging(), get_logger()
 ├── task_manager/     <- Async in-memory task tracking
 ├── triplestore/      <- Triple store backends (Delta views in UC)
-├── graphdb/          <- Pluggable graph DB engine abstraction (LadybugDB, …)
+├── graphdb/          <- Pluggable graph DB engine abstraction (Lakebase Postgres, …)
 ├── databricks/       <- Typed facades for Databricks API surfaces
 ├── graphql/          <- Strawberry GraphQL schema builder
 ├── w3c/              <- W3C standard parsers/generators (OWL, RDFS, R2RML, SPARQL, SHACL)
@@ -455,7 +455,7 @@ All logging goes through `back/core/logging/LogManager`.
 - **Logging**: Use %-style formatting (not f-strings) in logging calls for both security and performance.
 - **Session Data**: Minimize the number of session variables. Prefer computed values over stored ones when the cost is low.
 - **Caching**: Use TTL caches for frequently accessed, rarely changing data (e.g., version status in `version_status.py`).
-- **Triple Store / Graph DB**: Be mindful of query complexity; use incremental builds (`IncrementalBuildService`) when possible rather than full rebuilds.
+- **Triple Store / Graph DB**: Be mindful of query complexity. The Lakebase Graph DB engine streams large builds via `bulk_insert_iter` (`COPY FROM STDIN`) instead of materializing the full triple set in the FastAPI process; the Delta layer relies on Liquid Clustering and `OPTIMIZE` post-build.
 - **Background Tasks**: Offload heavy operations to `TaskManager` or Databricks Workflows. Log progress at each async step.
 
 **Frontend:**

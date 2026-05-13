@@ -1,22 +1,21 @@
 """Abstract registry data-store.
 
-Every operation that today reads or writes a JSON blob in the registry
-volume must go through a :class:`RegistryStore`. Backends are free to
-persist that data however they like (JSON-on-Volume, Postgres tables,
-…) as long as they honour the contracts defined here.
+The :class:`RegistryStore` ABC sits in front of the Lakebase registry
+implementation. A single concrete subclass
+(:class:`LakebaseRegistryStore`) exists today — the ABC is retained to
+keep the seam in place for future stores (Neo4j, Cosmos, …) and to
+make tests easy to fake.
 
 Contracts:
 
 - All methods are synchronous and return ``(ok, payload, message)`` or
-  ``(ok, message)`` tuples — matching the existing service signatures
-  to keep the refactor behaviour-preserving.
+  ``(ok, message)`` tuples — matching the existing service signatures.
 - Unknown domains / versions return ``(False, …)`` with a non-empty
   ``message``; they must NOT raise.
 - ``initialize`` is idempotent.
 - ``cache_key`` is used by the registry-level TTL cache to bind cached
   results to *this* store's identity. Two stores pointing at the same
-  registry triplet (catalog/schema/volume) for Volume backends, or the
-  same Postgres schema for Lakebase, must return the same key.
+  Lakebase database + schema must return the same key.
 """
 
 from __future__ import annotations
@@ -68,7 +67,7 @@ class RegistryStore(ABC):
     @property
     @abstractmethod
     def backend(self) -> str:
-        """Backend tag — ``"volume"`` or ``"lakebase"``."""
+        """Backend tag — always ``"lakebase"`` for now."""
 
     @property
     @abstractmethod
@@ -82,9 +81,6 @@ class RegistryStore(ABC):
     @abstractmethod
     def initialize(self, *, client: Any = None) -> Tuple[bool, str]:
         """Bring the backend up to a usable state (idempotent).
-
-        For :class:`VolumeRegistryStore` this means creating the UC
-        Volume (if missing) and writing the ``.registry`` marker.
 
         For :class:`LakebaseRegistryStore` this applies the DDL in
         ``store/lakebase_schema.sql`` and verifies connectivity with a
@@ -261,10 +257,8 @@ class RegistryStore(ABC):
     def table_row_counts(self, tables: Tuple[str, ...]) -> Dict[str, int]:
         """Return ``{table_name: row_count}`` for *tables*.
 
-        Default implementation returns ``0`` for every table — this is
-        a Lakebase-flavoured introspection helper used by the admin
-        Registry Location panel. Volume-backed stores have no such
-        notion and simply report zeros.
+        Default implementation returns ``0`` for every table — used by
+        the admin Registry Location panel for an at-a-glance inventory.
         """
         return {t: 0 for t in tables}
 
@@ -275,14 +269,10 @@ class RegistryStore(ABC):
     def close(self) -> None:
         """Release any held resources. Default: nothing to do."""
 
-    # Helpers used by VolumeRegistryStore for the binary-side path
-    # builders. Lakebase store overrides nothing here.
-
     @abstractmethod
     def domain_folder_id(self, folder: str) -> Optional[str]:
         """Return a stable internal identifier for *folder* (or ``None``).
 
-        Used by the UI's "rename folder" admin action and by the
-        migration command. Volume backend returns the folder name
-        unchanged; Lakebase backend returns the row's ``id`` (UUID).
+        Used by the UI's "rename folder" admin action. The Lakebase
+        backend returns the row's ``id`` (UUID).
         """

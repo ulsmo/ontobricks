@@ -79,6 +79,8 @@ done
 # variable to `databricks.yml > variables:`, also surface it in
 # `deploy.config.sh` and add a `--var=` line here.
 _dab_var_overrides=(
+    "--var=app_name=${APP_NAME}"
+    "--var=mcp_app_name=${MCP_APP_NAME}"
     "--var=warehouse_id=${WAREHOUSE_ID}"
     "--var=registry_catalog=${REGISTRY_CATALOG}"
     "--var=registry_schema=${REGISTRY_SCHEMA}"
@@ -292,6 +294,44 @@ if [[ "$TARGET" == *lakebase* ]]; then
         echo "        -d $LAKEBASE_BOOTSTRAP_DATABASE \\"
         echo "        -s $LAKEBASE_BOOTSTRAP_SCHEMA \\"
         echo "        -a $APP_NAME -a $MCP_APP_NAME"
+    fi
+
+    # ── Graph DB schema grants ─────────────────────────────────────────
+    # The Graph DB may live on a DIFFERENT Lakebase instance from the registry.
+    # LAKEBASE_GRAPH_PROJECT / _BRANCH / _DATABASE default to the registry
+    # values when empty (same-instance layout); set them in deploy.config.sh
+    # when Graph DB is on a separate instance.
+    _GRAPH_INSTANCE="${LAKEBASE_GRAPH_PROJECT:-$LAKEBASE_BOOTSTRAP_INSTANCE}"
+    _GRAPH_BRANCH="${LAKEBASE_GRAPH_BRANCH:-$LAKEBASE_BOOTSTRAP_BRANCH}"
+    _GRAPH_DATABASE="${LAKEBASE_GRAPH_DATABASE:-$LAKEBASE_BOOTSTRAP_DATABASE}"
+
+    # 1. Triple-table schema (companion + graph tables — e.g. ontobricks_graph).
+    #    Skipped silently when the schema does not exist yet (first deploy before a Build).
+    if [[ -n "${LAKEBASE_GRAPH_SCHEMA:-}" ]]; then
+        echo "  Granting on graph schema '${LAKEBASE_GRAPH_SCHEMA}' (${_GRAPH_INSTANCE} / ${_GRAPH_DATABASE})..."
+        scripts/bootstrap-lakebase-perms.sh \
+            -i "$_GRAPH_INSTANCE" \
+            -b "$_GRAPH_BRANCH" \
+            -d "$_GRAPH_DATABASE" \
+            -s "$LAKEBASE_GRAPH_SCHEMA" \
+            -a "$APP_NAME" \
+            -a "$MCP_APP_NAME" 2>&1 || true
+    fi
+
+    # 2. Sync-table schema — Lakebase creates a Postgres schema mirroring the
+    #    UC registry schema segment (e.g. "ontobricks") in the GRAPH DB to host
+    #    the _sync foreign tables.  Grant USAGE + SELECT so the app SP can read them.
+    #    Only needed when sync_mode = managed_synced. Skipped when unset or when
+    #    the schema has not been created yet (Lakeflow has not run its first snapshot).
+    if [[ -n "${LAKEBASE_SYNC_SCHEMA:-}" ]]; then
+        echo "  Granting on sync schema '${LAKEBASE_SYNC_SCHEMA}' (${_GRAPH_INSTANCE} / ${_GRAPH_DATABASE})..."
+        scripts/bootstrap-lakebase-perms.sh \
+            -i "$_GRAPH_INSTANCE" \
+            -b "$_GRAPH_BRANCH" \
+            -d "$_GRAPH_DATABASE" \
+            -s "$LAKEBASE_SYNC_SCHEMA" \
+            -a "$APP_NAME" \
+            -a "$MCP_APP_NAME" 2>&1 || true
     fi
 fi
 

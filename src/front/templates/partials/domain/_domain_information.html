@@ -178,49 +178,24 @@
                             </small>
                         </div>
 
-                        <!-- Incremental Snapshot (read-only, derived) -->
-                        <div class="mb-4">
-                            <label class="form-label fw-semibold">
-                                <i class="bi bi-clock-history me-1"></i> Incremental Snapshot <small class="text-muted">(Delta table)</small>
-                            </label>
-                            <div class="input-group">
-                                <span class="input-group-text bg-light"><i class="bi bi-table"></i></span>
-                                <input type="text" class="form-control font-monospace" id="domainSnapshotTableName"
-                                       value="{{ domain.snapshot_table or '' }}"
-                                       readonly
-                                       style="background-color: #e9ecef;"
-                                       placeholder="Configure the registry in Settings first">
-                            </div>
-                            <small class="text-muted">
-                                <i class="bi bi-info-circle me-1"></i>A managed Delta table that stores the triple set from the previous build.
-                                Used by <strong>incremental sync</strong> to compute the diff (SQL <code>EXCEPT</code>) and apply only
-                                additions and removals to the graph, instead of rebuilding from scratch.
-                                Automatically created on the first build.
-                            </small>
-                        </div>
-
                         <!-- Graph Database info (read-only, computed) -->
                         <div class="mb-3">
                             <label class="form-label fw-semibold">
                                 <i class="bi bi-diagram-3 me-1"></i> Graph Database <small class="text-muted">(Graph DB)</small>
                             </label>
-                            <div class="row g-2 mb-2">
-                                <div class="col-12">
-                                    <label class="form-label small text-muted mb-1">Local file</label>
-                                    <div class="form-control-plaintext font-monospace bg-light px-3 py-2 rounded border small"
-                                         id="ladybugLocalPath">/tmp/ontobricks/{{ domain.name|lower }}.lbug</div>
-                                </div>
+
+                            <div class="alert alert-light border small mb-2 py-2">
+                                <strong><i class="bi bi-database me-1"></i>Lakebase (Postgres)</strong>
+                                <p class="mb-1 mt-2 small">
+                                    Graph triples are stored in the App-bound Lakebase Postgres instance.
+                                    The logical table name follows your domain and version
+                                    (<span id="graphLakebaseLogicalTable" class="font-monospace">{{ graph_name|default('', true) }}</span>).
+                                    Schema and database are configured under <em>Settings → Graph DB</em>.
+                                </p>
+                                <p class="mb-0 small text-muted">
+                                    Postgres is the source of truth for the graph store.
+                                </p>
                             </div>
-                            <div class="row g-2">
-                                <div class="col-12">
-                                    <label class="form-label small text-muted mb-1">Registry location</label>
-                                    <div class="form-control-plaintext font-monospace bg-light px-3 py-2 rounded border small"
-                                         id="ladybugRegistryPath">{% if domain.registry.catalog and domain.domain_folder %}{{ domain.registry.catalog }}.{{ domain.registry.schema }}.{{ domain.registry.volume or 'OntoBricksRegistry' }}/domains/{{ domain.domain_folder }}/V{{ domain.version or '1' }}/{% else %}<span class="text-muted fst-italic">Registry not configured</span>{% endif %}</div>
-                                </div>
-                            </div>
-                            <small class="text-muted">
-                                <i class="bi bi-info-circle me-1"></i>Graph data is automatically synced to the registry when saving or loading the domain.
-                            </small>
                         </div>
                     </div>
 

@@ -242,13 +242,6 @@
                             <code id="psDtViewName" class="d-block text-break">N/A</code>
                             <div id="psDtViewReason" class="text-danger small mt-1" style="display:none;"></div>
                         </div>
-                        <div class="small mt-2" id="psDtSnapshotArea" style="display:none;">
-                            <div class="text-muted mb-1">Incremental Snapshot</div>
-                            <div class="d-flex justify-content-between align-items-center">
-                                <code id="psDtSnapshotName" class="text-break" style="font-size:.75em;"></code>
-                                <span id="psDtExistSnapshot"></span>
-                            </div>
-                        </div>
                     </div>
                 </div>
                 <!-- Graph DB Digital Twin -->
@@ -256,17 +249,31 @@
                     <div class="border rounded p-3 h-100" id="psDtGraphCard">
                         <div class="d-flex align-items-center mb-2">
                             <i class="bi bi-diagram-3-fill fs-5 me-2 text-primary"></i>
-                            <strong>Graph DB Digital Twin</strong>
+                            <strong id="psDtGraphBackendTitle">Graph DB (Lakebase)</strong>
                             <span id="psDtExistLocal" class="ms-auto"></span>
                         </div>
                         <div class="small">
-                            <div class="text-muted mb-1">Local graph database</div>
-                            <div class="d-flex justify-content-between align-items-center">
-                                <span class="text-muted">Registry archive</span>
-                                <span id="psDtExistRegistry"></span>
+                            <div class="text-muted mb-1 d-none" id="psDtGraphStorageSubtitle">Local graph database</div>
+                            <div id="psDtLakebaseDetails" class="d-none">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="text-muted">Database</span>
+                                    <code id="psDtLakebaseDatabase" class="text-break ob-code-tiny text-muted"></code>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="text-muted">Schema</span>
+                                    <code id="psDtLakebaseSchema" class="text-break ob-code-tiny text-muted"></code>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="text-muted">Table</span>
+                                    <code id="psDtLakebaseTable" class="text-break ob-code-tiny text-muted"></code>
+                                    <span id="psDtLakebaseTableExists" class="ms-1"></span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center d-none" id="psDtLakebaseSyncedUcRow">
+                                    <span class="text-muted">UC sync object</span>
+                                    <code id="psDtLakebaseSyncedUc" class="text-break ob-code-tiny text-muted"></code>
+                                    <span id="psDtLakebaseSyncedUcExists" class="ms-1"></span>
+                                </div>
                             </div>
-                            <code id="psDtRegistryPath" class="d-block text-break text-muted mt-1" style="display:none; font-size:.75em;"></code>
-                            <div id="psDtRegistryReason" class="text-danger small mt-1" style="display:none;"></div>
                         </div>
                         <div class="small mt-2" id="psDtTripleArea" style="display:none;">
                             <i class="bi bi-database me-1 text-muted"></i>

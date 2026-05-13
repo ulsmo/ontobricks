@@ -388,8 +388,8 @@ function _splitFqnPrefix(fqn) {
 }
 
 /**
- * Recompute the Triple-Store FQN, Snapshot FQN, and local Ladybug
- * path from the current domain name + version inputs. Mirrors the
+ * Recompute the Triple-Store FQN and Graph DB logical table hint
+ * from the current domain name + version inputs. Mirrors the
  * backend naming rules so the user sees what UC objects *will be*
  * called once they save the domain — without round-tripping to the
  * server. Bound to the domain-name ``change``/``blur`` event so it
@@ -402,7 +402,6 @@ function refreshDtNamesFromForm() {
     const safe = _safeDomainSlug(name);
     const version = versionEl ? versionEl.value.trim() : '1';
     const v = version || '1';
-    const safeVersion = _safeDomainSlug(v);
 
     const tsEl = document.getElementById('domainTriplestoreFullName');
     if (tsEl) {
@@ -411,16 +410,10 @@ function refreshDtNamesFromForm() {
         tsEl.value = prefix ? prefix.catalog + '.' + prefix.schema + '.' + tsName : (safe ? tsName : '');
     }
 
-    const snapEl = document.getElementById('domainSnapshotTableName');
-    if (snapEl) {
-        const prefix = _splitFqnPrefix(snapEl.value);
-        const snapName = '_ob_snapshot_' + safe + '_v' + safeVersion;
-        snapEl.value = prefix ? prefix.catalog + '.' + prefix.schema + '.' + snapName : (safe ? snapName : '');
-    }
-
-    const localEl = document.getElementById('ladybugLocalPath');
-    if (localEl && safe) {
-        localEl.textContent = '/tmp/ontobricks/' + safe + '_V' + v + '.lbug';
+    const cfg = window.__TRIPLESTORE_CONFIG || {};
+    const lbHint = document.getElementById('graphLakebaseLogicalTable');
+    if (lbHint && cfg.graph_engine === 'lakebase' && safe) {
+        lbHint.textContent = safe + '_V' + v;
     }
 }
 

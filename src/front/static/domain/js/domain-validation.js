@@ -449,19 +449,11 @@ function updateDtwinCard(data) {
         }
     }
 
-    // Snapshot
-    var snapshotArea = document.getElementById('psDtSnapshotArea');
-    if (snapshotArea && dt.snapshot_table) {
-        snapshotArea.style.display = '';
-        var snapshotName = document.getElementById('psDtSnapshotName');
-        if (snapshotName) snapshotName.textContent = dt.snapshot_table;
-        var snapshotBadge = document.getElementById('psDtExistSnapshot');
-        if (snapshotBadge) snapshotBadge.innerHTML = _dtBadge(dt.snapshot_exists, 'Exists', 'Not created', 'N/A');
-    } else if (snapshotArea) {
-        snapshotArea.style.display = 'none';
-    }
+    // Graph DB card — Lakebase details
+    var eng = dt.graph_engine || 'lakebase';
+    var titleGraph = document.getElementById('psDtGraphBackendTitle');
+    if (titleGraph) titleGraph.textContent = 'Graph DB (Lakebase)';
 
-    // Graph DB card
     var localEl = document.getElementById('psDtExistLocal');
     if (localEl) localEl.innerHTML = _dtBadge(dt.local_lbug_exists, 'Loaded', 'Not loaded', 'N/A');
 
@@ -472,27 +464,37 @@ function updateDtwinCard(data) {
         else graphCard.className = 'border rounded p-3 h-100';
     }
 
-    var regEl = document.getElementById('psDtExistRegistry');
-    if (regEl) {
-        regEl.innerHTML = _dtBadge(dt.registry_lbug_exists, 'Archived', 'Not archived', 'Not configured');
-        if (dt.registry_check_error) regEl.title = dt.registry_check_error;
-        else if (dt.registry_lbug_path) regEl.title = 'Archive: ' + dt.registry_lbug_path;
-        else regEl.title = '';
-    }
+    var lkDetails = document.getElementById('psDtLakebaseDetails');
+    if (lkDetails) lkDetails.classList.toggle('d-none', eng !== 'lakebase');
 
-    var regPathEl = document.getElementById('psDtRegistryPath');
-    if (regPathEl) {
-        regPathEl.textContent = dt.registry_lbug_path || '';
-        regPathEl.style.display = dt.registry_lbug_path ? '' : 'none';
-    }
-    var regReasonEl = document.getElementById('psDtRegistryReason');
-    if (regReasonEl) {
-        if (dt.registry_check_error) {
-            regReasonEl.textContent = dt.registry_check_error;
-            regReasonEl.style.display = '';
-        } else {
-            regReasonEl.textContent = '';
-            regReasonEl.style.display = 'none';
+    if (eng === 'lakebase') {
+        var psDb  = document.getElementById('psDtLakebaseDatabase');
+        var psSch = document.getElementById('psDtLakebaseSchema');
+        var psTbl = document.getElementById('psDtLakebaseTable');
+        var psUcRow = document.getElementById('psDtLakebaseSyncedUcRow');
+        var psUc    = document.getElementById('psDtLakebaseSyncedUc');
+        if (psDb)  psDb.textContent  = dt.lakebase_database || '—';
+        if (psSch) psSch.textContent = dt.lakebase_schema   || '—';
+        if (psTbl) psTbl.textContent = dt.lakebase_table    || '—';
+        var hasUc = !!(dt.lakebase_synced_uc);
+        if (psUcRow) psUcRow.classList.toggle('d-none', !hasUc);
+        if (psUc) psUc.textContent = dt.lakebase_synced_uc || '—';
+
+        // existence badges
+        var psTblExistsEl = document.getElementById('psDtLakebaseTableExists');
+        if (psTblExistsEl) {
+            if (dt.lakebase_table_exists === true)
+                psTblExistsEl.innerHTML = '<span class="badge bg-success bg-opacity-10 text-success border border-success" style="font-size:.65rem;"><i class="bi bi-check-circle-fill me-1"></i>Exists</span>';
+            else if (dt.lakebase_table_exists === false)
+                psTblExistsEl.innerHTML = '<span class="badge bg-secondary bg-opacity-10 text-secondary border" style="font-size:.65rem;"><i class="bi bi-dash-circle me-1"></i>Not found</span>';
+            else
+                psTblExistsEl.innerHTML = '';
+        }
+        var psUcExistsEl = document.getElementById('psDtLakebaseSyncedUcExists');
+        if (psUcExistsEl && hasUc) {
+            psUcExistsEl.innerHTML = '<span class="badge bg-info bg-opacity-10 text-info border border-info" style="font-size:.65rem;"><i class="bi bi-check-circle-fill me-1"></i>Registered</span>';
+        } else if (psUcExistsEl) {
+            psUcExistsEl.innerHTML = '';
         }
     }
 

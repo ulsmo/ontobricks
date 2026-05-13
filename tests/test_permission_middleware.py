@@ -322,7 +322,6 @@ class TestAdminOnlyPaths:
             "/settings/warehouses",
             "/settings/registry/initialize",
             "/settings/save",
-            "/settings/graph-engine",
         ],
     )
     def test_app_user_blocked_from_settings(self, path):
@@ -340,6 +339,9 @@ class TestAdminOnlyPaths:
             ("/settings/registry", "GET"),
             ("/settings/registry/domains", "GET"),
             ("/settings/registry/bridges", "GET"),
+            ("/settings/graph-engine", "GET"),
+            ("/settings/graph-engine-config", "GET"),
+            ("/settings/graph-engine/lakebase-health", "GET"),
         ],
     )
     def test_settings_read_only_exceptions_allow_non_admin(self, path, method):
@@ -356,6 +358,24 @@ class TestAdminOnlyPaths:
         NOT benefit from the read-only GET exception."""
         _, resp, result = _dispatch_with_roles(
             ROLE_APP_USER, ROLE_VIEWER, method="POST", path="/settings/registry"
+        )
+        assert resp.status_code in (302, 403)
+        assert not result.get("passed")
+
+    def test_post_graph_engine_still_admin_only(self):
+        """POST /settings/graph-engine must not use the GET read exception."""
+        _, resp, result = _dispatch_with_roles(
+            ROLE_APP_USER, ROLE_VIEWER, method="POST", path="/settings/graph-engine"
+        )
+        assert resp.status_code in (302, 403)
+        assert not result.get("passed")
+
+    def test_post_graph_engine_config_still_admin_only(self):
+        _, resp, result = _dispatch_with_roles(
+            ROLE_APP_USER,
+            ROLE_VIEWER,
+            method="POST",
+            path="/settings/graph-engine-config",
         )
         assert resp.status_code in (302, 403)
         assert not result.get("passed")

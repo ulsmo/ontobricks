@@ -14,7 +14,6 @@ import time
 from typing import Any, Dict, List, Optional
 
 from back.core.logging import get_logger
-from back.core.graphdb.GraphDBBackend import GraphDBBackend
 from back.core.w3c.rdf_utils import uri_local_name
 from back.core.reasoning.constants import AGG_FUNCTIONS, AGG_OPERATORS, RDF_TYPE
 from back.core.reasoning.models import InferredTriple, ReasoningResult, RuleViolation
@@ -91,7 +90,6 @@ class AggregateRuleEngine:
         t0 = time.time()
         result = ReasoningResult()
         base_uri = ontology.get("base_uri", "")
-        is_cypher = GraphDBBackend.is_cypher_backend(store)
 
         for rule in rules:
             if not rule.get("enabled", True):
@@ -104,7 +102,6 @@ class AggregateRuleEngine:
                     store,
                     table_name,
                     base_uri,
-                    is_cypher,
                     materialize,
                 )
                 result.merge(rule_result)
@@ -135,70 +132,40 @@ class AggregateRuleEngine:
         store: Any,
         table_name: str,
         base_uri: str,
-        is_cypher: bool,
         materialize: bool,
     ) -> ReasoningResult:
         result = ReasoningResult()
         name = rule.get("name", "unnamed")
 
-        if is_cypher:
-            query = self.build_cypher(rule, table_name, base_uri, store)
-        else:
-            query = self.build_sql(rule, table_name, base_uri)
+        query = self.build_sql(rule, store.sql_table_reference(table_name), base_uri)
 
         if not query:
             return result
 
         try:
-            if is_cypher:
-                conn = store.get_connection()
-                raw = conn.execute(query)
-                for row in raw:
-                    subj = row[0] if row else ""
-                    agg_val = row[1] if len(row) > 1 else ""
-                    result.violations.append(
-                        RuleViolation(
-                            rule_name=name,
+            raw = store.execute_query(query)
+            for row in raw:
+                subj = row.get("s", "")
+                agg_val = row.get("agg_val", "")
+                result.violations.append(
+                    RuleViolation(
+                        rule_name=name,
+                        subject=subj,
+                        message=f"Aggregate rule '{name}': value={agg_val}",
+                        check_type="aggregate",
+                        rule_type="aggregate",
+                    )
+                )
+                if materialize and rule.get("result_class_uri"):
+                    result.inferred_triples.append(
+                        InferredTriple(
                             subject=subj,
-                            message=f"Aggregate rule '{name}': value={agg_val}",
-                            check_type="aggregate",
-                            rule_type="aggregate",
+                            predicate=RDF_TYPE,
+                            object=rule["result_class_uri"],
+                            provenance=f"aggregate:{name}",
+                            rule_name=name,
                         )
                     )
-                    if materialize and rule.get("result_class_uri"):
-                        result.inferred_triples.append(
-                            InferredTriple(
-                                subject=subj,
-                                predicate=RDF_TYPE,
-                                object=rule["result_class_uri"],
-                                provenance=f"aggregate:{name}",
-                                rule_name=name,
-                            )
-                        )
-            else:
-                raw = store.execute_query(query)
-                for row in raw:
-                    subj = row.get("s", "")
-                    agg_val = row.get("agg_val", "")
-                    result.violations.append(
-                        RuleViolation(
-                            rule_name=name,
-                            subject=subj,
-                            message=f"Aggregate rule '{name}': value={agg_val}",
-                            check_type="aggregate",
-                            rule_type="aggregate",
-                        )
-                    )
-                    if materialize and rule.get("result_class_uri"):
-                        result.inferred_triples.append(
-                            InferredTriple(
-                                subject=subj,
-                                predicate=RDF_TYPE,
-                                object=rule["result_class_uri"],
-                                provenance=f"aggregate:{name}",
-                                rule_name=name,
-                            )
-                        )
         except Exception as e:
             logger.error("Aggregate rule query failed for '%s': %s", name, e)
 
@@ -260,71 +227,6 @@ class AggregateRuleEngine:
                 f"FROM {table} t0\n"
                 f"WHERE t0.predicate = '{RDF_TYPE}' AND t0.object = '{esc(target_uri)}'\n"
                 f"HAVING COUNT(t0.subject) {sql_op} {threshold}"
-            )
-
-    def build_cypher(
-        self,
-        rule: Dict,
-        table_name: str,
-        base_uri: str,
-        store: Any,
-    ) -> Optional[str]:
-        """Build Cypher aggregate query for the flat triple table."""
-        target_uri = rule.get("target_class_uri", "")
-        group_prop_uri = rule.get("group_by_property_uri", "")
-        agg_prop_uri = rule.get("aggregate_property_uri", "")
-        agg_func = rule.get("aggregate_function", "count").lower()
-        operator = rule.get("operator", "gt")
-        threshold = rule.get("threshold", "0")
-
-        if not target_uri or agg_func not in AGG_FUNCTIONS:
-            return None
-        cypher_op = AGG_OPERATORS.get(operator, ">")
-
-        tbl = store.get_node_table(table_name)
-
-        if group_prop_uri and agg_prop_uri:
-            cypher_agg = agg_func if agg_func != "count" else "count"
-            return (
-                f"MATCH (t0:{tbl}), (tg:{tbl}), (ta:{tbl})\n"
-                f"WHERE t0.predicate = '{RDF_TYPE}' AND t0.object = '{target_uri}'\n"
-                f"  AND tg.subject = t0.subject AND tg.predicate = '{group_prop_uri}'\n"
-                f"  AND ta.subject = tg.object AND ta.predicate = '{agg_prop_uri}'\n"
-                f"WITH t0.subject AS s, {cypher_agg}(CAST(ta.object AS DOUBLE)) AS agg_val\n"
-                f"WHERE agg_val {cypher_op} {threshold}\n"
-                f"RETURN s, agg_val"
-            )
-        elif agg_prop_uri:
-            cypher_agg = agg_func if agg_func != "count" else "count"
-            return (
-                f"MATCH (t0:{tbl}), (ta:{tbl})\n"
-                f"WHERE t0.predicate = '{RDF_TYPE}' AND t0.object = '{target_uri}'\n"
-                f"  AND ta.subject = t0.subject AND ta.predicate = '{agg_prop_uri}'\n"
-                f"WITH t0.subject AS s, {cypher_agg}(CAST(ta.object AS DOUBLE)) AS agg_val\n"
-                f"WHERE agg_val {cypher_op} {threshold}\n"
-                f"RETURN s, agg_val"
-            )
-        elif group_prop_uri:
-            agg_expr = (
-                f"{agg_func}(CAST(tg.object AS DOUBLE))"
-                if agg_func != "count"
-                else "count(tg.object)"
-            )
-            return (
-                f"MATCH (t0:{tbl}), (tg:{tbl})\n"
-                f"WHERE t0.predicate = '{RDF_TYPE}' AND t0.object = '{target_uri}'\n"
-                f"  AND tg.subject = t0.subject AND tg.predicate = '{group_prop_uri}'\n"
-                f"WITH t0.subject AS s, {agg_expr} AS agg_val\n"
-                f"WHERE agg_val {cypher_op} {threshold}\n"
-                f"RETURN s, agg_val"
-            )
-        else:
-            return (
-                f"MATCH (t0:{tbl})\n"
-                f"WHERE t0.predicate = '{RDF_TYPE}' AND t0.object = '{target_uri}'\n"
-                f"WITH '{target_uri}' AS s, count(t0.subject) AS agg_val\n"
-                f"WHERE agg_val {cypher_op} {threshold}\n"
-                f"RETURN s, agg_val"
             )
 
     @staticmethod

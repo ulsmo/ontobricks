@@ -71,6 +71,7 @@
 {
     "view_table": "{{ view_table|default('', true) }}",
     "graph_name": "{{ graph_name|default('', true) }}",
+    "graph_engine": "{{ graph_engine|default('lakebase', true) }}",
     "cache": {{ triplestore_cache|default({})|tojson }}
 }
 </script>

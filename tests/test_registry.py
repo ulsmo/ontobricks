@@ -1,4 +1,10 @@
-"""Tests for back.objects.registry.RegistryService — RegistryCfg and RegistryService."""
+"""Tests for back.objects.registry.RegistryService — RegistryCfg and RegistryService.
+
+Lakebase is the only registry backend since v0.4.0 — the tests cover
+config resolution, path builders (UC Volume side, for binary artefacts
+only), domain/version CRUD wiring, and the scheduler's bootstrap-time
+``RegistryCfg`` serialisation.
+"""
 
 import json
 import pytest
@@ -7,7 +13,6 @@ from unittest.mock import MagicMock, patch, call
 from back.objects.registry.RegistryService import (
     RegistryCfg,
     RegistryService,
-    resolve_default_backend,
     _DEFAULT_VOLUME,
     _DOMAINS_FOLDER,
     _LEGACY_DOMAINS_FOLDER,
@@ -30,7 +35,6 @@ def _make_settings(**overrides):
         "registry_schema": "env_sch",
         "registry_volume": "",
         "registry_volume_path": "",
-        "registry_backend": "volume",
         "lakebase_schema": "ontobricks_registry",
         "lakebase_database": "",
         "databricks_host": "https://host.databricks.com",
@@ -47,16 +51,13 @@ def _make_uc():
     return MagicMock()
 
 
-def _make_svc(cfg=None, uc=None):
-    """Build a RegistryService with the domains folder pre-resolved (skips UC probe).
+def _make_svc(cfg=None, uc=None, store=None):
+    """Build a RegistryService with a mocked store + domains folder pre-resolved.
 
-    The store now owns its own domain-folder probe, so we pre-resolve
-    both the service- and the store-level cache.
+    Avoids touching Lakebase from RegistryService construction.
     """
-    svc = RegistryService(cfg or CFG, uc or _make_uc())
+    svc = RegistryService(cfg or CFG, uc or _make_uc(), store=store or MagicMock())
     svc._resolved_domains_folder = _DOMAINS_FOLDER
-    if hasattr(svc._store, "_resolved_domains_folder"):
-        svc._store._resolved_domains_folder = _DOMAINS_FOLDER
     return svc
 
 
@@ -98,7 +99,27 @@ class TestRegistryCfgConstruction:
         assert c.schema == ""
         assert c.volume == _DEFAULT_VOLUME
 
-    def test_from_domain_uses_session_registry(self):
+
+class TestRegistryCfgFromDomain:
+    """Resolution order for ``RegistryCfg.from_domain``.
+
+    Each test patches ``fetch_lakebase_registry_triplet`` so the unit
+    suite stays hermetic — the live Lakebase round-trip is covered by
+    the integration suite.
+    """
+
+    @staticmethod
+    def _patch_no_lakebase_row(monkeypatch):
+        from back.objects.registry.store.lakebase import store as _lb_store
+
+        monkeypatch.setattr(
+            _lb_store,
+            "fetch_lakebase_registry_triplet",
+            lambda schema, database="": None,
+        )
+
+    def test_uses_session_registry(self, monkeypatch):
+        self._patch_no_lakebase_row(monkeypatch)
         domain = _make_domain(
             registry={"catalog": "s_cat", "schema": "s_sch", "volume": "s_vol"}
         )
@@ -108,7 +129,8 @@ class TestRegistryCfgConstruction:
         assert c.schema == "s_sch"
         assert c.volume == "s_vol"
 
-    def test_from_domain_falls_back_to_settings(self):
+    def test_falls_back_to_settings(self, monkeypatch):
+        self._patch_no_lakebase_row(monkeypatch)
         domain = _make_domain(registry={})
         settings = _make_settings(
             registry_catalog="env_c", registry_schema="env_s", registry_volume="env_v"
@@ -118,20 +140,15 @@ class TestRegistryCfgConstruction:
         assert c.schema == "env_s"
         assert c.volume == "env_v"
 
-    def test_from_domain_partial_fallback(self):
-        domain = _make_domain(registry={"catalog": "session_cat"})
-        settings = _make_settings(registry_catalog="env_cat", registry_schema="env_sch")
-        c = RegistryCfg.from_domain(domain, settings)
-        assert c.catalog == "session_cat"
-        assert c.schema == "env_sch"
-
-    def test_from_domain_empty_volume_defaults(self):
+    def test_empty_volume_defaults(self, monkeypatch):
+        self._patch_no_lakebase_row(monkeypatch)
         domain = _make_domain(registry={})
         settings = _make_settings(registry_volume="")
         c = RegistryCfg.from_domain(domain, settings)
         assert c.volume == _DEFAULT_VOLUME
 
-    def test_from_domain_registry_volume_path_overrides_session(self):
+    def test_registry_volume_path_overrides_session(self, monkeypatch):
+        self._patch_no_lakebase_row(monkeypatch)
         domain = _make_domain(
             registry={"catalog": "wrong", "schema": "wrong", "volume": "wrong_vol"},
         )
@@ -143,29 +160,12 @@ class TestRegistryCfgConstruction:
         assert c.schema == "ontobricks_deployed"
         assert c.volume == "registry"
 
-    def test_from_domain_volume_path_keeps_session_backend(self):
-        """The Volume-resource path must NOT clobber the admin-saved
-        backend choice. Otherwise flipping the radio in Settings →
-        Registry Location is silently discarded on every request."""
-        domain = _make_domain(
-            registry={"backend": "lakebase"},
-        )
-        settings = _make_settings(
-            registry_volume_path="/Volumes/benoit_cayla/ontobricks_deployed/registry",
-            registry_backend="volume",
-        )
-        c = RegistryCfg.from_domain(domain, settings)
-        assert c.backend == "lakebase"
-        assert c.catalog == "benoit_cayla"
-        assert c.schema == "ontobricks_deployed"
-        assert c.volume == "registry"
-
-    def test_from_domain_volume_path_keeps_session_lakebase_overrides(self):
-        """Lakebase schema/database overrides saved in the Settings UI
-        must survive on a Databricks Apps deployment."""
+    def test_lakebase_overrides_survive_volume_binding(self, monkeypatch):
+        """Lakebase schema/database saved in the Settings UI must
+        survive on a Databricks Apps deployment with a bound Volume."""
+        self._patch_no_lakebase_row(monkeypatch)
         domain = _make_domain(
             registry={
-                "backend": "lakebase",
                 "lakebase_schema": "custom_schema",
                 "lakebase_database": "custom_db",
             },
@@ -176,61 +176,34 @@ class TestRegistryCfgConstruction:
             lakebase_database="env_db",
         )
         c = RegistryCfg.from_domain(domain, settings)
-        assert c.backend == "lakebase"
         assert c.lakebase_schema == "custom_schema"
         assert c.lakebase_database == "custom_db"
 
-    def test_from_domain_no_volume_path_session_backend_wins(self):
-        """Same precedence on the non-bound (local-dev) path."""
-        domain = _make_domain(
-            registry={
-                "catalog": "c",
-                "schema": "s",
-                "volume": "v",
-                "backend": "lakebase",
-            },
-        )
-        settings = _make_settings(registry_backend="volume")
-        c = RegistryCfg.from_domain(domain, settings)
-        assert c.backend == "lakebase"
 
-
-class TestRegistryCfgFromDomainLakebaseTriplet:
-    """``backend == "lakebase"`` reads catalog/schema/volume from the
-    Lakebase ``registries`` row when no Apps Volume path is injected.
-    When ``REGISTRY_VOLUME_PATH`` parses successfully, that binding wins
-    for the UC triplet so binary paths match the mounted resource even if
-    the row still holds a stale default (e.g. ``OntoBricksRegistry`` from
-    an older init). Operators should run *Initialize* to upsert the row
-    for consistency.
+class TestRegistryCfgFromDomainLakebaseRow:
+    """``RegistryCfg.from_domain`` reads the catalog/schema/volume
+    triplet from the Lakebase ``registries`` row when no Apps Volume
+    path is injected; when both are present, the Volume binding wins.
     """
 
     def test_volume_binding_overrides_lakebase_row_triplet(self, monkeypatch):
         from back.objects.registry.store.lakebase import store as _lb_store
 
-        # Lakebase row disagrees with the Apps-bound Volume resource path.
-        # The binding must win so UC paths match the mount.
         monkeypatch.setattr(
             _lb_store,
             "fetch_lakebase_registry_triplet",
             lambda schema, database="": ("benoit_cayla", "ontobricks", "OntoBricksRegistry"),
         )
-        domain = _make_domain(registry={"backend": "lakebase"})
+        domain = _make_domain(registry={})
         settings = _make_settings(
             registry_volume_path="/Volumes/benoit_cayla/ontobricks_deployed/registry",
-            registry_backend="lakebase",
         )
         c = RegistryCfg.from_domain(domain, settings)
-        assert c.backend == "lakebase"
         assert c.catalog == "benoit_cayla"
         assert c.schema == "ontobricks_deployed"
         assert c.volume == "registry"
 
     def test_lakebase_unreachable_falls_back_to_volume_binding(self, monkeypatch):
-        # ``fetch_lakebase_registry_triplet`` returns ``None`` when the
-        # row is missing or Lakebase is offline. The cfg must still
-        # resolve cleanly so the app doesn't 500 — fall back to the
-        # bound Volume resource path (the existing behaviour).
         from back.objects.registry.store.lakebase import store as _lb_store
 
         monkeypatch.setattr(
@@ -238,51 +211,19 @@ class TestRegistryCfgFromDomainLakebaseTriplet:
             "fetch_lakebase_registry_triplet",
             lambda schema, database="": None,
         )
-        domain = _make_domain(registry={"backend": "lakebase"})
+        domain = _make_domain(registry={})
         settings = _make_settings(
             registry_volume_path="/Volumes/benoit_cayla/ontobricks_deployed/registry",
-            registry_backend="lakebase",
         )
         c = RegistryCfg.from_domain(domain, settings)
-        assert c.backend == "lakebase"
         assert c.catalog == "benoit_cayla"
         assert c.schema == "ontobricks_deployed"
         assert c.volume == "registry"
 
-    def test_volume_backend_ignores_lakebase_row(self, monkeypatch):
-        # Volume backend must not consult Lakebase at all — that would
-        # be wasted I/O, *and* we want Volume-bound deployments to keep
-        # tracking the resource binding even if there's stale data in
-        # the Lakebase row from a prior life.
-        from back.objects.registry.store.lakebase import store as _lb_store
-
-        called = {"yes": False}
-
-        def _spy(schema, database=""):
-            called["yes"] = True
-            return ("x", "y", "z")
-
-        monkeypatch.setattr(_lb_store, "fetch_lakebase_registry_triplet", _spy)
-        domain = _make_domain(registry={"backend": "volume"})
-        settings = _make_settings(
-            registry_volume_path="/Volumes/benoit_cayla/ontobricks_deployed/registry",
-            registry_backend="volume",
-        )
-        c = RegistryCfg.from_domain(domain, settings)
-        assert called["yes"] is False
-        assert c.schema == "ontobricks_deployed"
-
     def test_prefer_volume_binding_skips_lakebase_row(self, monkeypatch):
-        """Initialize path: ``prefer_volume_binding=True`` must bypass the
-        cached ``registries`` row and pin the cfg to the Volume binding.
-
-        Regression: re-binding the Volume resource and re-clicking
-        Initialize used to silently no-op the row update because the
-        cfg used to upsert the row was itself read from the (stale)
-        row. With this flag the row is skipped, and the upsert
-        propagates the new triplet (e.g. switching the dev sandbox
-        from ``ontobricks_deployed.registry`` to
-        ``ontobricks_deployed_test.registry_test``).
+        """Initialize path: ``prefer_volume_binding=True`` must bypass
+        the cached ``registries`` row so a re-bind + re-init cycle
+        propagates the new triplet into Lakebase.
         """
         from back.objects.registry.store.lakebase import store as _lb_store
 
@@ -293,28 +234,21 @@ class TestRegistryCfgFromDomainLakebaseTriplet:
             return ("benoit_cayla", "ontobricks", "OntoBricksRegistry")
 
         monkeypatch.setattr(_lb_store, "fetch_lakebase_registry_triplet", _spy)
-        domain = _make_domain(registry={"backend": "lakebase"})
+        domain = _make_domain(registry={})
         settings = _make_settings(
             registry_volume_path=(
                 "/Volumes/benoit_cayla/ontobricks_deployed_test/registry_test"
             ),
-            registry_backend="lakebase",
         )
         c = RegistryCfg.from_domain(
             domain, settings, prefer_volume_binding=True
         )
-        # Row read must NOT have happened.
         assert called["yes"] is False
-        # Triplet must come from the bound Volume resource.
-        assert c.backend == "lakebase"
         assert c.catalog == "benoit_cayla"
         assert c.schema == "ontobricks_deployed_test"
         assert c.volume == "registry_test"
 
-    def test_lakebase_row_used_with_lb_database_override(self, monkeypatch):
-        # The lakebase_database override (admin-saved) must be passed
-        # to the triplet probe so two databases on the same Lakebase
-        # instance can each have their own registry row.
+    def test_lakebase_database_override_passed_to_triplet_probe(self, monkeypatch):
         from back.objects.registry.store.lakebase import store as _lb_store
 
         captured = {}
@@ -327,14 +261,12 @@ class TestRegistryCfgFromDomainLakebaseTriplet:
         monkeypatch.setattr(_lb_store, "fetch_lakebase_registry_triplet", _spy)
         domain = _make_domain(
             registry={
-                "backend": "lakebase",
                 "lakebase_schema": "custom_schema",
                 "lakebase_database": "custom_db",
             }
         )
         settings = _make_settings(
             registry_volume_path="/Volumes/benoit_cayla/ontobricks_deployed/registry",
-            registry_backend="lakebase",
         )
         RegistryCfg.from_domain(domain, settings)
         assert captured == {"schema": "custom_schema", "database": "custom_db"}
@@ -355,13 +287,10 @@ class TestRegistryCfgHelpers:
 
     def test_as_dict(self):
         c = RegistryCfg("x", "y", "z")
-        # ``backend`` and ``lakebase_*`` were added when Lakebase
-        # support landed — Volume-only callers see the defaults.
         assert c.as_dict() == {
             "catalog": "x",
             "schema": "y",
             "volume": "z",
-            "backend": "volume",
             "lakebase_schema": "ontobricks_registry",
             "lakebase_database": "",
         }
@@ -371,98 +300,8 @@ class TestRegistryCfgHelpers:
         assert RegistryCfg.from_dict(c.as_dict()) == c
 
 
-class TestResolveDefaultBackend:
-    """``resolve_default_backend`` is the single source of truth for the
-    "auto" → concrete-name mapping. Lakebase wins when the runtime has
-    psycopg + PG* env vars; otherwise we stay on Volume.
-    """
-
-    def test_explicit_volume_passes_through(self):
-        assert resolve_default_backend("volume") == "volume"
-
-    def test_explicit_lakebase_passes_through(self):
-        # Honoured even when the runtime probe would say "no" — operators
-        # may pin Lakebase deliberately and prefer a clear failure at
-        # connection time over a silent downgrade to Volume.
-        assert resolve_default_backend("lakebase") == "lakebase"
-
-    def test_unknown_value_falls_back_to_volume(self):
-        # Defensive: never crash on operator typos in REGISTRY_BACKEND.
-        assert resolve_default_backend("nope") == "volume"
-
-    @staticmethod
-    def _patch_runtime(monkeypatch, available: bool) -> None:
-        """Patch the module-level ``_lakebase_runtime_available`` probe.
-
-        ``__init__.py`` re-exports the *class* ``RegistryService`` under the
-        same dotted path as the submodule, so ``getattr(package,
-        'RegistryService')`` resolves to the class and shadows the module.
-        Pull the actual module out of :data:`sys.modules` to keep the
-        monkeypatch unambiguous.
-        """
-        import sys
-
-        mod = sys.modules["back.objects.registry.RegistryService"]
-        monkeypatch.setattr(mod, "_lakebase_runtime_available", lambda: available)
-
-    def test_auto_with_lakebase_runtime_picks_lakebase(self, monkeypatch):
-        self._patch_runtime(monkeypatch, True)
-        assert resolve_default_backend("auto") == "lakebase"
-
-    def test_empty_string_with_lakebase_runtime_picks_lakebase(self, monkeypatch):
-        # Empty / None must behave identically to the explicit ``"auto"``
-        # sentinel — both mean "unset".
-        self._patch_runtime(monkeypatch, True)
-        assert resolve_default_backend("") == "lakebase"
-        assert resolve_default_backend(None) == "lakebase"
-
-    def test_auto_without_lakebase_runtime_falls_back(self, monkeypatch):
-        self._patch_runtime(monkeypatch, False)
-        assert resolve_default_backend("auto") == "volume"
-
-    def test_auto_is_case_insensitive(self, monkeypatch):
-        self._patch_runtime(monkeypatch, True)
-        assert resolve_default_backend("AUTO") == "lakebase"
-        assert resolve_default_backend(" Auto ") == "lakebase"
-
-
-class TestRegistryCfgFromDomainAuto:
-    """``Settings.registry_backend = 'auto'`` (the new default) must flow
-    through :meth:`RegistryCfg.from_domain` so a fresh deployment without
-    a saved UI choice picks Lakebase when the runtime supports it.
-    """
-
-    def test_auto_settings_with_lakebase_runtime_picks_lakebase(self, monkeypatch):
-        TestResolveDefaultBackend._patch_runtime(monkeypatch, True)
-        domain = _make_domain()
-        settings = _make_settings(registry_backend="auto")
-        assert RegistryCfg.from_domain(domain, settings).backend == "lakebase"
-
-    def test_auto_settings_without_lakebase_runtime_falls_back(self, monkeypatch):
-        TestResolveDefaultBackend._patch_runtime(monkeypatch, False)
-        domain = _make_domain()
-        settings = _make_settings(registry_backend="auto")
-        assert RegistryCfg.from_domain(domain, settings).backend == "volume"
-
-    def test_session_volume_pin_beats_auto_default(self, monkeypatch):
-        # Admin explicitly chose Volume in the UI — must stick even when
-        # Lakebase is available (otherwise the backend chooser is a lie).
-        TestResolveDefaultBackend._patch_runtime(monkeypatch, True)
-        domain = _make_domain(registry={"backend": "volume"})
-        settings = _make_settings(registry_backend="auto")
-        assert RegistryCfg.from_domain(domain, settings).backend == "volume"
-
-    def test_session_auto_inherits_runtime_default(self, monkeypatch):
-        # ``"auto"`` saved into the session means "no explicit choice yet"
-        # — go through the resolver, don't silently freeze on Volume.
-        TestResolveDefaultBackend._patch_runtime(monkeypatch, True)
-        domain = _make_domain(registry={"backend": "auto"})
-        settings = _make_settings(registry_backend="volume")
-        assert RegistryCfg.from_domain(domain, settings).backend == "lakebase"
-
-
 # ==================================================================
-# RegistryService — path builders
+# RegistryService — path builders (UC Volume side, for binary artefacts)
 # ==================================================================
 
 
@@ -504,19 +343,16 @@ class TestPathBuilders:
             == "/Volumes/cat/sch/vol/domains/p/.schedule_history.json"
         )
 
-    def test_paths_with_different_cfg(self):
-        c = RegistryCfg("a", "b", "c")
-        svc = _make_svc(c)
-        assert svc.volume_root() == "/Volumes/a/b/c"
-
 
 class TestResolveDomainsFolderFallback:
-    """Test backward-compatible folder resolution (domains/ vs legacy projects/)."""
+    """Backward-compatible folder resolution (domains/ vs legacy projects/)
+    for the UC Volume side that still holds binary artefacts.
+    """
 
     def test_prefers_domains_folder(self):
         uc = _make_uc()
         uc.list_directory.return_value = (True, [], "")
-        svc = RegistryService(CFG, uc)
+        svc = RegistryService(CFG, uc, store=MagicMock())
         assert svc.domains_path().endswith("/domains")
 
     def test_falls_back_to_projects_folder(self):
@@ -525,7 +361,7 @@ class TestResolveDomainsFolderFallback:
             (False, [], "not found"),
             (True, [], ""),
         ]
-        svc = RegistryService(CFG, uc)
+        svc = RegistryService(CFG, uc, store=MagicMock())
         assert svc.domains_path().endswith("/projects")
 
     def test_defaults_to_domains_when_neither_exists(self):
@@ -534,115 +370,47 @@ class TestResolveDomainsFolderFallback:
             (False, [], "not found"),
             (False, [], "not found"),
         ]
-        svc = RegistryService(CFG, uc)
+        svc = RegistryService(CFG, uc, store=MagicMock())
         assert svc.domains_path().endswith("/domains")
 
     def test_resolution_is_cached(self):
         uc = _make_uc()
         uc.list_directory.return_value = (True, [], "")
-        svc = RegistryService(CFG, uc)
+        svc = RegistryService(CFG, uc, store=MagicMock())
         svc.domains_path()
         svc.domains_path()
         assert uc.list_directory.call_count == 1
 
 
 # ==================================================================
-# RegistryService — lifecycle
+# RegistryService — lifecycle (initialize / is_initialized)
 # ==================================================================
 
 
 class TestIsInitialized:
-    def test_true_when_marker_exists(self):
-        uc = _make_uc()
-        uc.read_file.return_value = (True, "content", "")
-        svc = RegistryService(CFG, uc)
+    def test_delegates_to_store(self):
+        store = MagicMock()
+        store.is_initialized.return_value = True
+        svc = _make_svc(store=store)
         assert svc.is_initialized() is True
-        uc.read_file.assert_called_once_with("/Volumes/cat/sch/vol/.registry")
-
-    def test_false_when_marker_missing(self):
-        uc = _make_uc()
-        uc.read_file.return_value = (False, "", "Not found")
-        svc = RegistryService(CFG, uc)
-        assert svc.is_initialized() is False
+        store.is_initialized.assert_called_once()
 
 
 class TestInitialize:
-    def test_creates_volume_and_marker(self):
-        uc = _make_uc()
-        # ``initialize`` now goes through the store, which writes the
-        # ``.registry`` marker via ``uc.write_file`` and expects a
-        # ``(ok, msg)`` tuple back.
-        uc.write_file.return_value = (True, "ok")
-        client = MagicMock()
-        client.list_volumes.return_value = []
-        client.create_volume.return_value = True
-
-        svc = RegistryService(CFG, uc)
-        ok, msg = svc.initialize(client)
-
-        assert ok is True
-        assert "initialized" in msg.lower()
-        client.create_volume.assert_called_once_with("cat", "sch", "vol")
-        uc.write_file.assert_called_once()
-
-    def test_skips_volume_creation_if_exists(self):
-        uc = _make_uc()
-        uc.write_file.return_value = (True, "ok")
-        client = MagicMock()
-        client.list_volumes.return_value = ["vol"]
-
-        svc = RegistryService(CFG, uc)
-        ok, _ = svc.initialize(client)
-
-        assert ok is True
-        client.create_volume.assert_not_called()
-
-    def test_returns_false_if_volume_creation_fails(self):
-        uc = _make_uc()
-        client = MagicMock()
-        client.list_volumes.return_value = []
-        client.create_volume.return_value = False
-
-        svc = RegistryService(CFG, uc)
-        ok, msg = svc.initialize(client)
-
-        assert ok is False
-        assert "failed" in msg.lower()
-
-
-class TestInitializeLakebase:
-    """Lakebase backend Initialize: must create the binary Volume on UC
-    *and* upsert the ``registries`` row from the cfg the service was
-    built with.
-
-    Regressions covered:
-
-    1. Re-running Initialize after re-binding the Volume resource must
-       propagate the new ``(catalog, schema, volume)`` triplet into the
-       row — the cfg fed to the store must be the *current* Volume
-       binding, not a triplet snapshot from the (stale) row.
-       ``SettingsService.initialize_registry_result`` now passes
-       ``prefer_volume_binding=True`` to ``RegistryService.from_context``
-       to make that the case; this test pins the contract end-to-end
-       via the constructor path.
-    2. Volume creation result is surfaced in the message instead of
-       silently swallowed as a warning, so the admin sees whether
-       ``CREATE VOLUME`` worked or whether the SP needs the privilege
-       granted out-of-band.
+    """``initialize`` ensures the binary UC Volume exists *and*
+    forwards to the Lakebase store's ``initialize``.
     """
 
     @staticmethod
-    def _lb_cfg():
+    def _cfg():
         return RegistryCfg(
             catalog="benoit_cayla",
             schema="ontobricks_deployed_test",
             volume="registry_test",
-            backend="lakebase",
             lakebase_schema="ontobricks_registry",
         )
 
-    def test_creates_volume_when_missing_and_upserts_row_from_cfg(self):
-        cfg = self._lb_cfg()
+    def test_creates_volume_when_missing_and_initialises_store(self):
         store = MagicMock()
         store.initialize.return_value = (
             True,
@@ -652,7 +420,7 @@ class TestInitializeLakebase:
         client.list_volumes.return_value = []
         client.create_volume.return_value = True
 
-        svc = RegistryService(cfg, _make_uc(), store=store)
+        svc = RegistryService(self._cfg(), _make_uc(), store=store)
         ok, msg = svc.initialize(client)
 
         assert ok is True
@@ -662,46 +430,34 @@ class TestInitializeLakebase:
         client.create_volume.assert_called_once_with(
             "benoit_cayla", "ontobricks_deployed_test", "registry_test"
         )
-        # Row upsert is delegated to the store, which writes from
-        # ``self._cfg`` — pinning that we forwarded the cfg verbatim.
         store.initialize.assert_called_once_with()
-        # Surface both the schema-init message and the Volume creation
-        # so the admin can confirm both halves landed.
         assert "Lakebase registry initialized" in msg
         assert (
             "Created binary volume "
             "benoit_cayla.ontobricks_deployed_test.registry_test"
         ) in msg
 
-    def test_skips_creation_when_volume_already_exists_and_says_so(self):
-        cfg = self._lb_cfg()
+    def test_skips_creation_when_volume_already_exists(self):
         store = MagicMock()
         store.initialize.return_value = (True, "Lakebase registry initialized")
         client = MagicMock()
         client.list_volumes.return_value = ["registry_test"]
 
-        svc = RegistryService(cfg, _make_uc(), store=store)
+        svc = RegistryService(self._cfg(), _make_uc(), store=store)
         ok, msg = svc.initialize(client)
 
         assert ok is True
         client.create_volume.assert_not_called()
-        assert (
-            "already exists"
-        ) in msg
+        assert "already exists" in msg
 
     def test_volume_creation_failure_warns_but_still_initialises_schema(self):
-        # CREATE VOLUME requires its own UC privilege. If the SP lacks
-        # it, surface a clear warning but keep the Lakebase schema/row
-        # creation so the admin can grant the volume privilege out-of-
-        # band and retry.
-        cfg = self._lb_cfg()
         store = MagicMock()
         store.initialize.return_value = (True, "Lakebase registry initialized")
         client = MagicMock()
         client.list_volumes.return_value = []
         client.create_volume.return_value = False
 
-        svc = RegistryService(cfg, _make_uc(), store=store)
+        svc = RegistryService(self._cfg(), _make_uc(), store=store)
         ok, msg = svc.initialize(client)
 
         assert ok is True
@@ -711,146 +467,51 @@ class TestInitializeLakebase:
         assert "registry_test" in msg
 
     def test_volume_probe_exception_is_reported_not_swallowed(self):
-        cfg = self._lb_cfg()
         store = MagicMock()
         store.initialize.return_value = (True, "Lakebase registry initialized")
         client = MagicMock()
         client.list_volumes.side_effect = RuntimeError("uc 503")
 
-        svc = RegistryService(cfg, _make_uc(), store=store)
+        svc = RegistryService(self._cfg(), _make_uc(), store=store)
         ok, msg = svc.initialize(client)
 
         assert ok is True
-        # Schema initialise still runs even when the volume probe
-        # explodes — Volume permissions are orthogonal to the Lakebase
-        # schema state, so we don't want a transient UC outage to block
-        # registry initialisation.
         store.initialize.assert_called_once_with()
         assert "WARNING" in msg
         assert "uc 503" in msg
 
 
 # ==================================================================
-# RegistryService — domain CRUD
+# RegistryService — domain CRUD (delegates to store)
 # ==================================================================
 
 
 class TestListDomains:
-    def test_success(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (
-            True,
-            [
-                {"name": "proj_b"},
-                {"name": ".hidden"},
-                {"name": "proj_a"},
-            ],
-            "",
-        )
-        svc = _make_svc(uc=uc)
-
-        ok, names, msg = svc.list_domains()
-        assert ok is True
-        assert names == ["proj_a", "proj_b"]
-
-    def test_excludes_hidden_dirs(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (
-            True,
-            [
-                {"name": ".registry"},
-                {"name": ".hidden"},
-                {"name": "visible"},
-            ],
-            "",
-        )
-        svc = _make_svc(uc=uc)
+    def test_delegates_to_store(self):
+        store = MagicMock()
+        store.list_domain_folders.return_value = (True, ["a", "b"], "")
+        svc = _make_svc(store=store)
 
         ok, names, _ = svc.list_domains()
-        assert names == ["visible"]
-
-    def test_failure(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (False, [], "Not found")
-        svc = _make_svc(uc=uc)
-
-        ok, names, msg = svc.list_domains()
-        assert ok is False
-        assert names == []
-        assert msg == "Not found"
-
-
-class TestListDomainDetails:
-    def test_returns_names_descriptions_versions(self):
-        uc = _make_uc()
-        uc.list_directory.side_effect = [
-            # First call: list domain folders under domains/
-            (True, [{"name": "proj_a"}, {"name": ".hidden"}], ""),
-            # Second call: list_versions -> list V{N}/ dirs inside proj_a
-            (True, [{"name": "V2"}, {"name": "V1"}], ""),
-        ]
-        uc.read_file.side_effect = [
-            (
-                True,
-                json.dumps(
-                    {
-                        "info": {
-                            "description": "My desc",
-                            "mcp_enabled": True,
-                            "last_update": "2025-06-01T10:00:00",
-                            "last_build": "2025-06-01T11:00:00",
-                        }
-                    }
-                ),
-                "",
-            ),
-            (True, json.dumps({"info": {"description": "Old desc"}}), ""),
-        ]
-        svc = _make_svc(uc=uc)
-
-        ok, result, _ = svc.list_domain_details()
         assert ok is True
-        assert len(result) == 1
-        assert result[0]["name"] == "proj_a"
-        assert result[0]["description"] == "My desc"
-        assert result[0]["versions"] == [
-            {
-                "version": "2",
-                "active": True,
-                "last_update": "2025-06-01T10:00:00",
-                "last_build": "2025-06-01T11:00:00",
-            },
-            {"version": "1", "active": False, "last_update": "", "last_build": ""},
-        ]
+        assert names == ["a", "b"]
+        store.list_domain_folders.assert_called_once()
 
 
 class TestListAllBridges:
-    """``list_all_bridges`` must enumerate domains via the active
-    backend's :class:`RegistryStore` (so Lakebase registries work)
-    and only fall back to the Volume for the ontology read path
-    (which itself goes through ``read_version`` on the store too).
+    """``list_all_bridges`` enumerates domains via the store, not
+    by listing the UC Volume's ``domains/`` folder.
     """
 
-    def test_uses_store_list_domain_folders_not_volume(self):
-        """Regression: previously enumerated via
-        ``_uc.list_directory(self.domains_path(), dirs_only=True)``
-        which returns nothing on a Lakebase-only registry.
-        """
+    def test_uses_store_list_domain_folders(self):
         uc = _make_uc()
-        # Make sure we'd FAIL noisily if the implementation regressed
-        # back to listing through ``_uc`` against the domains folder.
         uc.list_directory.side_effect = AssertionError(
             "list_all_bridges must not enumerate domains via _uc"
         )
-        svc = _make_svc(uc=uc)
+        store = MagicMock()
+        store.list_domain_folders.return_value = (True, ["proj_a", "proj_b"], "")
+        svc = _make_svc(uc=uc, store=store)
 
-        # Force the store to return two domains; load_latest_domain_data
-        # is patched to short-circuit (no I/O).
-        svc._store.list_domain_folders = lambda: (
-            True,
-            ["proj_a", "proj_b"],
-            "",
-        )
         svc.load_latest_domain_data = lambda name: (
             True,
             {
@@ -888,14 +549,9 @@ class TestListAllBridges:
         assert all(d["bridges"] for d in result)
 
     def test_skips_hidden_folder_names(self):
-        """``.hidden`` entries from the store must be filtered out."""
-        uc = _make_uc()
-        svc = _make_svc(uc=uc)
-        svc._store.list_domain_folders = lambda: (
-            True,
-            [".system", "real"],
-            "",
-        )
+        store = MagicMock()
+        store.list_domain_folders.return_value = (True, [".system", "real"], "")
+        svc = _make_svc(store=store)
         svc.load_latest_domain_data = lambda name: (
             True,
             {"versions": {"1": {"ontology": {"base_uri": "u", "classes": []}}}},
@@ -908,257 +564,79 @@ class TestListAllBridges:
 
 
 class TestDeleteDomain:
-    def test_delegates_to_recursive_delete(self):
+    def test_delegates_to_store_and_volume(self):
         uc = _make_uc()
         uc.list_directory.return_value = (True, [], "")
         uc.delete_directory.return_value = (True, "ok")
-        svc = _make_svc(uc=uc)
+        store = MagicMock()
+        store.delete_domain.return_value = []
+        svc = _make_svc(uc=uc, store=store)
 
         errors = svc.delete_domain("my_proj")
 
         assert errors == []
-        # Two passes: once via ``store.delete_domain`` (JSON side) and
-        # once via ``recursive_delete`` (binary side — documents/ +
-        # *.lbug.tar.gz live on the Volume regardless of backend).
-        assert all(
-            c == call("/Volumes/cat/sch/vol/domains/my_proj")
-            for c in uc.list_directory.call_args_list
-        )
-        assert uc.list_directory.call_count == 2
+        store.delete_domain.assert_called_once_with("my_proj")
+        # Binary side (documents/ + *.lbug.tar.gz) wiped via
+        # recursive_delete against the UC Volume.
+        assert uc.list_directory.call_args_list == [
+            call("/Volumes/cat/sch/vol/domains/my_proj")
+        ]
 
 
 # ==================================================================
-# RegistryService — version management
+# RegistryService — version management (delegates to store)
 # ==================================================================
 
 
-class TestListVersions:
-    def test_extracts_version_strings(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (
-            True,
-            [
-                {"name": "V1"},
-                {"name": "V2"},
-                {"name": "V10"},
-                {"name": ".schedule_history.json"},
-            ],
-            "",
-        )
-        svc = _make_svc(uc=uc)
-
+class TestVersionDelegation:
+    def test_list_versions_delegates(self):
+        store = MagicMock()
+        store.list_versions.return_value = (True, ["2", "1"], "")
+        svc = _make_svc(store=store)
         ok, versions, _ = svc.list_versions("proj")
-        assert ok is True
-        assert set(versions) == {"1", "2", "10"}
+        assert ok and versions == ["2", "1"]
 
-    def test_failure(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (False, [], "err")
-        svc = _make_svc(uc=uc)
-
-        ok, versions, msg = svc.list_versions("proj")
-        assert ok is False
-        assert versions == []
-
-
-class TestListVersionsSorted:
-    def test_sorted_descending(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (
-            True,
-            [
-                {"name": "V1"},
-                {"name": "V10"},
-                {"name": "V2"},
-            ],
-            "",
-        )
-        svc = _make_svc(uc=uc)
-
-        vs = svc.list_versions_sorted("proj")
-        assert vs == ["10", "2", "1"]
-
-    def test_sorted_ascending(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (
-            True,
-            [
-                {"name": "V3"},
-                {"name": "V1"},
-            ],
-            "",
-        )
-        svc = _make_svc(uc=uc)
-
-        vs = svc.list_versions_sorted("proj", reverse=False)
-        assert vs == ["1", "3"]
-
-    def test_empty_on_failure(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (False, [], "err")
-        svc = _make_svc(uc=uc)
-
-        assert svc.list_versions_sorted("proj") == []
-
-
-class TestGetLatestVersion:
-    def test_returns_highest(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (
-            True,
-            [
-                {"name": "V1"},
-                {"name": "V3"},
-                {"name": "V2"},
-            ],
-            "",
-        )
-        svc = _make_svc(uc=uc)
-
-        assert svc.get_latest_version("proj") == "3"
-
-    def test_returns_none_when_empty(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (True, [], "")
-        svc = _make_svc(uc=uc)
-
-        assert svc.get_latest_version("proj") is None
-
-
-class TestReadVersion:
-    def test_success(self):
-        uc = _make_uc()
+    def test_read_version_delegates(self):
+        store = MagicMock()
         data = {"info": {"name": "test"}}
-        uc.read_file.return_value = (True, json.dumps(data), "")
-        svc = _make_svc(uc=uc)
-
-        ok, result, msg = svc.read_version("proj", "2")
+        store.read_version.return_value = (True, data, "")
+        svc = _make_svc(store=store)
+        ok, result, _ = svc.read_version("proj", "2")
         assert ok is True
         assert result == data
-        uc.read_file.assert_called_once_with(
-            "/Volumes/cat/sch/vol/domains/proj/V2/V2.json"
-        )
+        store.read_version.assert_called_once_with("proj", "2")
 
-    def test_file_not_found(self):
-        uc = _make_uc()
-        uc.read_file.return_value = (False, "", "Not found")
-        svc = _make_svc(uc=uc)
+    def test_write_version_parses_json_string(self):
+        store = MagicMock()
+        store.write_version.return_value = (True, "ok")
+        svc = _make_svc(store=store)
+        ok, _ = svc.write_version("proj", "5", '{"data": true}')
+        assert ok is True
+        store.write_version.assert_called_once()
+        folder, version, payload = store.write_version.call_args.args
+        assert folder == "proj"
+        assert version == "5"
+        assert payload == {"data": True}
 
-        ok, result, msg = svc.read_version("proj", "99")
-        assert ok is False
-        assert result == {}
-
-    def test_invalid_json(self):
-        uc = _make_uc()
-        uc.read_file.return_value = (True, "not-json{", "")
-        svc = _make_svc(uc=uc)
-
-        ok, result, msg = svc.read_version("proj", "1")
+    def test_write_version_rejects_invalid_json(self):
+        store = MagicMock()
+        svc = _make_svc(store=store)
+        ok, msg = svc.write_version("proj", "5", "not-json{")
         assert ok is False
         assert "Invalid JSON" in msg
+        store.write_version.assert_not_called()
 
-
-class TestWriteVersion:
-    def test_delegates_to_uc(self):
-        uc = _make_uc()
-        uc.write_file.return_value = (True, "ok")
-        svc = _make_svc(uc=uc)
-
-        ok, msg = svc.write_version("proj", "5", '{"data": true}')
+    def test_delete_version_delegates(self):
+        store = MagicMock()
+        store.delete_version.return_value = (True, "ok")
+        svc = _make_svc(store=store)
+        ok, _ = svc.delete_version("proj", "3")
         assert ok is True
-        # The store re-serialises the parsed dict with ``indent=2`` and
-        # always overwrites — we check the path + dict equivalence
-        # rather than the exact string spelling.
-        uc.write_file.assert_called_once()
-        path, payload = uc.write_file.call_args.args
-        assert path == "/Volumes/cat/sch/vol/domains/proj/V5/V5.json"
-        assert json.loads(payload) == {"data": True}
-        assert uc.write_file.call_args.kwargs == {"overwrite": True}
-
-
-class TestDeleteVersion:
-    def test_delegates_to_recursive_delete(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (
-            True,
-            [
-                {
-                    "name": "V3.json",
-                    "path": "/Volumes/cat/sch/vol/domains/proj/V3/V3.json",
-                    "is_directory": False,
-                },
-            ],
-            "",
-        )
-        uc.delete_file.return_value = (True, "ok")
-        uc.delete_directory.return_value = (True, "ok")
-        svc = _make_svc(uc=uc)
-
-        ok, msg = svc.delete_version("proj", "3")
-        assert ok is True
-        # As with delete_domain, the JSON side (store) and the binary
-        # side (service.recursive_delete) each list the version dir.
-        for c in uc.list_directory.call_args_list:
-            assert c == call("/Volumes/cat/sch/vol/domains/proj/V3")
-        assert uc.list_directory.call_count >= 1
+        store.delete_version.assert_called_once_with("proj", "3")
 
 
 # ==================================================================
-# RegistryService — load_latest_domain_data
-# ==================================================================
-
-
-class TestLoadLatestDomainData:
-    def test_success(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (
-            True,
-            [
-                {"name": "V1"},
-                {"name": "V3"},
-                {"name": "V2"},
-            ],
-            "",
-        )
-        data = {"info": {"name": "test"}}
-        uc.read_file.return_value = (True, json.dumps(data), "")
-
-        svc = _make_svc(uc=uc)
-        ok, result, version, err = svc.load_latest_domain_data("proj")
-
-        assert ok is True
-        assert result == data
-        assert version == "3"
-        assert err == ""
-        uc.read_file.assert_called_once_with(
-            "/Volumes/cat/sch/vol/domains/proj/V3/V3.json"
-        )
-
-    def test_no_versions(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (True, [], "")
-
-        svc = _make_svc(uc=uc)
-        ok, result, version, err = svc.load_latest_domain_data("empty_proj")
-
-        assert ok is False
-        assert "no versions" in err.lower()
-
-    def test_read_failure(self):
-        uc = _make_uc()
-        uc.list_directory.return_value = (True, [{"name": "V1"}], "")
-        uc.read_file.return_value = (False, "", "Read error")
-
-        svc = _make_svc(uc=uc)
-        ok, result, version, err = svc.load_latest_domain_data("proj")
-
-        assert ok is False
-        assert version == "1"
-        assert err == "Read error"
-
-
-# ==================================================================
-# RegistryService — recursive_delete
+# RegistryService — recursive_delete (UC Volume binary side)
 # ==================================================================
 
 
@@ -1190,9 +668,7 @@ class TestRecursiveDelete:
         uc = _make_uc()
         uc.list_directory.return_value = (
             True,
-            [
-                {"name": "f.json", "path": "/p/f.json", "is_directory": False},
-            ],
+            [{"name": "f.json", "path": "/p/f.json", "is_directory": False}],
             "",
         )
         uc.delete_file.return_value = (False, "Permission denied")
@@ -1222,38 +698,46 @@ class TestRecursiveDelete:
 
 class TestFromContext:
     @patch("back.core.helpers.get_databricks_host_and_token")
-    def test_factory(self, mock_creds):
+    def test_factory(self, mock_creds, monkeypatch):
+        from back.objects.registry.store.lakebase import store as _lb_store
+
+        monkeypatch.setattr(
+            _lb_store,
+            "fetch_lakebase_registry_triplet",
+            lambda schema, database="": None,
+        )
         mock_creds.return_value = ("https://host", "tok")
         domain = _make_domain(registry={"catalog": "c", "schema": "s", "volume": "v"})
         settings = _make_settings()
 
-        svc = RegistryService.from_context(domain, settings)
+        with patch.object(
+            RegistryService, "_build_store", return_value=MagicMock()
+        ):
+            svc = RegistryService.from_context(domain, settings)
 
         assert svc.cfg == RegistryCfg("c", "s", "v")
         assert svc.uc is not None
 
 
 # ==================================================================
-# BuildScheduler._resolve_creds — backend fields plumbed at startup
+# BuildScheduler._resolve_creds — Lakebase fields plumbed at startup
 # ==================================================================
 
 
-class TestSchedulerResolveCredsBackend:
+class TestSchedulerResolveCredsLakebase:
     """At startup the scheduler restores jobs *before* the global
     config has been read, so the ``RegistryCfg`` it builds from
-    *Settings* must already carry ``backend`` / ``lakebase_schema``
-    / ``lakebase_database``. Otherwise schedule reads/writes would
-    silently default to Volume even on a Lakebase deployment.
+    *Settings* must already carry ``lakebase_schema`` /
+    ``lakebase_database``.
     """
 
-    def test_volume_defaults(self):
+    def test_defaults_from_settings(self):
         from back.objects.registry.scheduler import BuildScheduler
 
         settings = _make_settings()
         host, token, cfg = BuildScheduler._resolve_creds(settings)
         assert host == "https://host.databricks.com"
         assert token == "tok-123"
-        assert cfg["backend"] == "volume"
         assert cfg["lakebase_schema"] == "ontobricks_registry"
         assert cfg["lakebase_database"] == ""
 
@@ -1261,12 +745,10 @@ class TestSchedulerResolveCredsBackend:
         from back.objects.registry.scheduler import BuildScheduler
 
         settings = _make_settings(
-            registry_backend="lakebase",
             lakebase_schema="ontobricks_registry",
             lakebase_database="ontobricks_other",
         )
         _h, _t, cfg = BuildScheduler._resolve_creds(settings)
-        assert cfg["backend"] == "lakebase"
         assert cfg["lakebase_schema"] == "ontobricks_registry"
         assert cfg["lakebase_database"] == "ontobricks_other"
 
@@ -1280,202 +762,10 @@ class TestSchedulerResolveCredsBackend:
             registry_schema="env_s",
             registry_volume="OntoBricksRegistry",
             registry_volume_path="/Volumes/acme/prod/custom_registry_vol",
-            registry_backend="lakebase",
         )
         _h, _t, cfg = BuildScheduler._resolve_creds(settings)
         assert cfg["catalog"] == "acme"
         assert cfg["schema"] == "prod"
         assert cfg["volume"] == "custom_registry_vol"
-        assert cfg["backend"] == "lakebase"
 
 
-# ==================================================================
-# POST /settings/registry — locked-resource semantics
-# ==================================================================
-
-
-class TestSaveRegistryRouteLockedSemantics:
-    """The registry is "locked" when the Volume is supplied by a
-    Databricks App resource binding (``settings.registry_volume_path``
-    is set inside ``is_databricks_app()``). Locking must protect the
-    bound triplet ``catalog/schema/volume`` only — the **backend
-    chooser** (Volume ↔ Lakebase) and the Lakebase-side knobs
-    (``lakebase_schema`` / ``lakebase_database``) must remain editable
-    so admins can flip backends from the UI without redeploying.
-    """
-
-    # NOTE: these tests run the ``save_registry`` coroutine via a fresh
-    # private event loop instead of relying on pytest-asyncio. With
-    # ``asyncio_mode = auto`` and the ``anyio`` plugin both loaded, the
-    # session-wide pytest-asyncio runner can leak state across tests
-    # (``Runner.run() cannot be called from a running event loop``).
-    # Using ``asyncio.new_event_loop().run_until_complete`` keeps these
-    # cases hermetic.
-
-    def test_locked_blocks_catalog_schema_volume_changes(self):
-        from api.routers.internal import settings as settings_router
-
-        req = MagicMock()
-        req.json = MagicMock(return_value=_AwaitableValue({"catalog": "evil"}))
-        sm = MagicMock()
-        s = _make_settings()
-
-        with patch.object(
-            settings_router.config_service, "is_registry_locked", return_value=True
-        ), patch.object(
-            settings_router.config_service, "apply_registry_save"
-        ) as apply_mock:
-            with pytest.raises(Exception) as excinfo:
-                _run(settings_router.save_registry(req, sm, s))
-            assert "cannot be changed here" in str(excinfo.value)
-            apply_mock.assert_not_called()
-
-    def test_locked_allows_backend_switch(self):
-        """Locked registry must still accept ``backend`` updates."""
-        from api.routers.internal import settings as settings_router
-
-        req = MagicMock()
-        req.json = MagicMock(
-            return_value=_AwaitableValue({"backend": "lakebase"})
-        )
-        sm = MagicMock()
-        s = _make_settings()
-
-        with patch.object(
-            settings_router.config_service, "is_registry_locked", return_value=True
-        ), patch.object(
-            settings_router.config_service,
-            "apply_registry_save",
-            return_value={"success": True, "message": "ok"},
-        ) as apply_mock:
-            result = _run(settings_router.save_registry(req, sm, s))
-
-        assert result["success"] is True
-        apply_mock.assert_called_once()
-        forwarded = apply_mock.call_args[0][0]
-        assert forwarded == {"backend": "lakebase"}
-
-    def test_locked_allows_lakebase_database_override(self):
-        from api.routers.internal import settings as settings_router
-
-        req = MagicMock()
-        req.json = MagicMock(
-            return_value=_AwaitableValue(
-                {"lakebase_database": "ontobricks_other", "lakebase_schema": "reg"}
-            )
-        )
-        sm = MagicMock()
-        s = _make_settings()
-
-        with patch.object(
-            settings_router.config_service, "is_registry_locked", return_value=True
-        ), patch.object(
-            settings_router.config_service,
-            "apply_registry_save",
-            return_value={"success": True, "message": "ok"},
-        ) as apply_mock:
-            result = _run(settings_router.save_registry(req, sm, s))
-
-        assert result["success"] is True
-        forwarded = apply_mock.call_args[0][0]
-        assert forwarded["lakebase_database"] == "ontobricks_other"
-        assert forwarded["lakebase_schema"] == "reg"
-
-    def test_locked_strips_locked_keys_silently_when_empty(self):
-        """Empty locked-keys (e.g. ``catalog: ""``) are stripped, not rejected.
-
-        Some clients echo the full registry config back; an empty / falsy
-        value is a no-op and should not raise — only *non-empty* writes
-        to the bound triplet are blocked.
-        """
-        from api.routers.internal import settings as settings_router
-
-        req = MagicMock()
-        req.json = MagicMock(
-            return_value=_AwaitableValue(
-                {"catalog": "", "schema": "", "backend": "lakebase"}
-            )
-        )
-        sm = MagicMock()
-        s = _make_settings()
-
-        with patch.object(
-            settings_router.config_service, "is_registry_locked", return_value=True
-        ), patch.object(
-            settings_router.config_service,
-            "apply_registry_save",
-            return_value={"success": True, "message": "ok"},
-        ) as apply_mock:
-            _run(settings_router.save_registry(req, sm, s))
-
-        forwarded = apply_mock.call_args[0][0]
-        assert "catalog" not in forwarded
-        assert "schema" not in forwarded
-        assert forwarded["backend"] == "lakebase"
-
-    def test_unlocked_passes_payload_through(self):
-        from api.routers.internal import settings as settings_router
-
-        req = MagicMock()
-        payload = {"catalog": "c", "schema": "s", "volume": "v", "backend": "volume"}
-        req.json = MagicMock(return_value=_AwaitableValue(payload))
-        sm = MagicMock()
-        s = _make_settings()
-
-        with patch.object(
-            settings_router.config_service, "is_registry_locked", return_value=False
-        ), patch.object(
-            settings_router.config_service,
-            "apply_registry_save",
-            return_value={"success": True, "message": "ok"},
-        ) as apply_mock:
-            _run(settings_router.save_registry(req, sm, s))
-
-        apply_mock.assert_called_once()
-        forwarded = apply_mock.call_args[0][0]
-        assert forwarded == payload
-
-
-class _AwaitableValue:
-    """Minimal awaitable wrapper so ``await req.json()`` works in tests."""
-
-    def __init__(self, value):
-        self._value = value
-
-    def __await__(self):
-        async def _coro():
-            return self._value
-
-        return _coro().__await__()
-
-
-def _run(coro):
-    """Run *coro* on a fresh event loop in a worker thread and return its result.
-
-    Some earlier tests in the suite leave an event loop running on
-    the main thread (a known pytest-asyncio + anyio interaction).
-    Spawning a thread with its own loop sidesteps that pollution and
-    keeps each ``save_registry`` invocation hermetic.
-    """
-    import asyncio
-    import threading
-
-    result = [None]
-    error: list = []
-
-    def _runner():
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            result[0] = loop.run_until_complete(coro)
-        except BaseException as exc:  # noqa: BLE001
-            error.append(exc)
-        finally:
-            loop.close()
-
-    t = threading.Thread(target=_runner, daemon=True)
-    t.start()
-    t.join()
-    if error:
-        raise error[0]
-    return result[0]

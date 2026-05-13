@@ -32,9 +32,9 @@ echo "Activating virtual environment..."
 source .venv/bin/activate
 echo ""
 
-# Install dependencies
+# Install dependencies (including optional lakebase extras for local dev)
 echo "Installing dependencies..."
-uv pip install -e .
+uv sync --extra lakebase
 echo ""
 
 # Create .env file if it doesn't exist
@@ -57,6 +57,6 @@ echo "  3. Run the application: python run.py"
 echo "  4. Open browser to: http://localhost:8000"
 echo ""
 echo "To run tests: pytest"
-echo "To format code: black app/ tests/"
+echo "To format code: black src/ tests/"
 echo ""
 

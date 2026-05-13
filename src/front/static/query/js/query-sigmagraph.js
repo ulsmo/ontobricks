@@ -41,6 +41,7 @@ var SigmaGraph = (function () {
     var _highlightedSeeds = null; // Set of node IDs to visually emphasize (ring effect)
     var _pendingHighlightTerm = null; // term to auto-highlight after next filter execution
     var _graphFilterActive = false;
+    var _lastExpandedSeedUris = null;
     var _initialized = false;
     var _cachedStats = null;
     var _libsRequested = false;
@@ -1873,6 +1874,7 @@ var SigmaGraph = (function () {
     // -- Shared expand + render pipeline ----------------------------------
     async function _expandAndRenderGraph(uris, opts) {
         opts = opts || {};
+        _lastExpandedSeedUris = uris && uris.length ? uris.slice() : null;
         var maxDepth = parseInt(document.getElementById('sgFilterDepth')?.value || '3');
         var maxEntities = parseInt(document.getElementById('sgMaxEntities')?.value || '5000');
         var highlightTerm = opts.highlightTerm || (document.getElementById('sgFilterValue')?.value || '').trim();
@@ -2308,6 +2310,10 @@ var SigmaGraph = (function () {
         init: init,
         reload: function () { if (_hasData()) { _render(); } else { _showEmptyState(); } },
         refresh: function (isGroupToggle) { _render(undefined, isGroupToggle); },
+        refreshCurrentExpansion: async function () {
+            if (!_graphFilterActive || !_lastExpandedSeedUris || !_lastExpandedSeedUris.length) return false;
+            try { await _expandAndRenderGraph(_lastExpandedSeedUris); return true; } catch (_) { return false; }
+        },
 
         selectEntity: function (entityId) {
             if (!_graph || !_graph.hasNode(entityId)) return;

@@ -1,12 +1,12 @@
 """Tests for all business rule enhancements.
 
 Covers:
-- Phase 1: SWRL built-ins (registry, parser, SQL/Cypher translation)
+- Phase 1: SWRL built-ins (registry, parser, SQL translation)
 - Phase 2: SHACL rules (service method)
-- Phase 3: Closed-world negation (parser, SQL/Cypher translation)
-- Phase 4: Decision tables (engine, SQL/Cypher generation, validation)
+- Phase 3: Closed-world negation (parser, SQL translation)
+- Phase 4: Decision tables (engine, SQL generation, validation)
 - Phase 5: SPARQL CONSTRUCT rules (engine, SQL generation, validation)
-- Phase 6: Aggregate rules (engine, SQL/Cypher generation, validation)
+- Phase 6: Aggregate rules (engine, SQL generation, validation)
 - Cross-cutting: RuleViolation model, ReasoningService orchestration
 """
 
@@ -16,25 +16,11 @@ from unittest.mock import MagicMock, patch
 from back.core.reasoning.models import InferredTriple, ReasoningResult, RuleViolation
 from back.core.reasoning.SWRLParser import SWRLParser
 from back.core.reasoning.SWRLSQLTranslator import SWRLSQLTranslator
-from back.core.reasoning.SWRLFlatCypherTranslator import SWRLFlatCypherTranslator
 from back.core.reasoning.SWRLBuiltinRegistry import SWRLBuiltin, SWRLBuiltinRegistry
 from back.core.reasoning.DecisionTableEngine import DecisionTableEngine
 from back.core.reasoning.SPARQLRuleEngine import SPARQLRuleEngine
 from back.core.reasoning.AggregateRuleEngine import AggregateRuleEngine
 from back.core.reasoning.ReasoningService import ReasoningService
-
-
-class _StubLadybugStyleNodeTable:
-    """Mimics ``LadybugBase.get_node_table`` for Cypher query-builder tests."""
-
-    @staticmethod
-    def get_node_table(table_name: str) -> str:
-        from back.core.helpers import safe_identifier
-
-        base = table_name.split(".")[-1] if "." in table_name else table_name
-        if not base:
-            return "triples"
-        return safe_identifier(base) or "triples"
 
 
 # ===========================================================================
@@ -162,24 +148,6 @@ class TestSWRLSQLBuiltinTranslation:
         assert "SELECT DISTINCT" in sql
 
 
-class TestSWRLFlatCypherBuiltinTranslation:
-    def test_violation_cypher_with_builtin(self):
-        translator = SWRLFlatCypherTranslator(node_table="Triple")
-        params = {
-            "antecedent": "Customer(?x), hasAge(?x, ?age), greaterThan(?age, 65)",
-            "consequent": "SeniorCustomer(?x)",
-            "base_uri": "http://test.org/ontology#",
-            "uri_map": {
-                "customer": "http://test.org/ontology#Customer",
-                "seniorcustomer": "http://test.org/ontology#SeniorCustomer",
-                "hasage": "http://test.org/ontology/hasAge",
-            },
-        }
-        cypher = translator.build_violation_query(params)
-        assert cypher is not None
-        assert "RETURN DISTINCT" in cypher
-
-
 # ===========================================================================
 # Phase 3: Closed-World Negation
 # ===========================================================================
@@ -201,22 +169,6 @@ class TestNegationSQL:
         sql = translator.build_violation_sql("triples", params)
         assert sql is not None
         assert "NOT EXISTS" in sql
-
-    def test_negated_antecedent_cypher(self):
-        translator = SWRLFlatCypherTranslator(node_table="Triple")
-        params = {
-            "antecedent": "Customer(?x), not(hasPayment(?x, ?y))",
-            "consequent": "UnpaidCustomer(?x)",
-            "base_uri": "http://test.org/ontology#",
-            "uri_map": {
-                "customer": "http://test.org/ontology#Customer",
-                "unpaidcustomer": "http://test.org/ontology#UnpaidCustomer",
-                "haspayment": "http://test.org/ontology/hasPayment",
-            },
-        }
-        cypher = translator.build_violation_query(params)
-        assert cypher is not None
-        assert "NOT EXISTS" in cypher
 
 
 # ===========================================================================
@@ -278,18 +230,6 @@ class TestDecisionTableEngine:
         assert "SELECT DISTINCT" in sql
         assert "http://test.org/ontology#Customer" in sql
         assert "http://test.org/ontology/tier" in sql
-
-    def test_build_violation_cypher(self, sample_table):
-        engine = DecisionTableEngine()
-        store = _StubLadybugStyleNodeTable()
-        cypher = engine.build_violation_cypher(
-            sample_table,
-            "Triple",
-            "http://test.org/ontology#",
-            store,
-        )
-        assert cypher is not None
-        assert "RETURN DISTINCT" in cypher
 
     def test_validate_valid_table(self, sample_table):
         errors = DecisionTableEngine.validate_table(sample_table)
@@ -394,19 +334,6 @@ class TestAggregateRuleEngine:
         assert "HAVING" in sql
         assert "> 5" in sql
 
-    def test_build_cypher(self, sample_rule):
-        engine = AggregateRuleEngine()
-        store = _StubLadybugStyleNodeTable()
-        cypher = engine.build_cypher(
-            sample_rule,
-            "Triple",
-            "http://test.org/ontology#",
-            store,
-        )
-        assert cypher is not None
-        assert "count" in cypher.lower()
-        assert "> 5" in cypher
-
     def test_validate_valid_rule(self, sample_rule):
         errors = AggregateRuleEngine.validate_rule(sample_rule)
         assert errors == []
@@ -463,22 +390,6 @@ class TestAggregateRuleEngine:
         assert "COUNT" in sql
         assert "> 100" in sql
 
-    def test_build_cypher_count_only(self):
-        engine = AggregateRuleEngine()
-        store = _StubLadybugStyleNodeTable()
-        rule = {
-            "target_class_uri": "http://test.org/Customer",
-            "group_by_property_uri": "",
-            "aggregate_property_uri": "",
-            "aggregate_function": "count",
-            "operator": "gte",
-            "threshold": "50",
-        }
-        cypher = engine.build_cypher(rule, "Triple", "http://test.org/", store)
-        assert cypher is not None
-        assert "count" in cypher.lower()
-        assert ">= 50" in cypher
-
     def test_build_sql_group_by_sum(self):
         """Group-by only with SUM should use SUM, not COUNT."""
         engine = AggregateRuleEngine()
@@ -494,21 +405,6 @@ class TestAggregateRuleEngine:
         assert sql is not None
         assert "SUM" in sql
         assert "COUNT" not in sql
-
-    def test_build_cypher_group_by_sum(self):
-        engine = AggregateRuleEngine()
-        store = _StubLadybugStyleNodeTable()
-        rule = {
-            "target_class_uri": "http://test.org/Customer",
-            "group_by_property_uri": "http://test.org/orderAmount",
-            "aggregate_property_uri": "",
-            "aggregate_function": "sum",
-            "operator": "gt",
-            "threshold": "1000",
-        }
-        cypher = engine.build_cypher(rule, "Triple", "http://test.org/", store)
-        assert cypher is not None
-        assert "sum" in cypher.lower()
 
     def test_validate_count_only_no_properties(self):
         """COUNT-only rules are valid without group_by or aggregate_property."""

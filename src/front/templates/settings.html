@@ -52,9 +52,9 @@
     </li>
     {% endif %}
     <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tab-ladybugdb" data-bs-toggle="tab" data-bs-target="#pane-ladybugdb"
-                type="button" role="tab" aria-controls="pane-ladybugdb" aria-selected="false">
-            <i class="bi bi-bug me-1"></i> Graph DB
+        <button class="nav-link" id="tab-graphdb" data-bs-toggle="tab" data-bs-target="#pane-graphdb"
+                type="button" role="tab" aria-controls="pane-graphdb" aria-selected="false">
+            <i class="bi bi-diagram-3 me-1"></i> Graph DB
         </button>
     </li>
     <li class="nav-item" role="presentation">
@@ -161,69 +161,190 @@
             </div>
             {% endif %}
 
-            <!-- ==================== LADYBUGDB TAB ==================== -->
-            <div class="tab-pane fade" id="pane-ladybugdb" role="tabpanel" aria-labelledby="tab-ladybugdb">
+            <!-- ==================== GRAPH DB TAB ==================== -->
+            <div class="tab-pane fade" id="pane-graphdb" role="tabpanel" aria-labelledby="tab-graphdb">
+
+                <div id="graphDbTabLoadingBanner" class="alert alert-light border d-none align-items-center justify-content-center gap-2 py-3 mb-3" role="status" aria-live="polite">
+                    <span class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></span>
+                    <span class="text-muted small">Loading Graph DB settings…</span>
+                </div>
+
+                <div id="graphDbTabContent">
 
                 <!-- Graph DB Engine selector -->
                 <div class="mb-4">
-                    <label for="graphEngineSelect" class="form-label fw-semibold">
+                    <label for="graphEngineSelect" class="form-label fw-semibold mb-2">
                         Graph DB Engine
                         <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
                             <i class="bi bi-shield-lock me-1"></i>Admin only
                         </span>
                     </label>
-                    <div class="d-flex align-items-center gap-2">
-                        <select class="form-select form-select-sm" id="graphEngineSelect" style="max-width:20rem;">
-                            <option value="ladybug">Internal (LadybugDB)</option>
-                        </select>
-                        <button type="button" class="btn btn-sm btn-primary" id="btnSaveGraphEngine">
-                            <i class="bi bi-check-circle me-1"></i> Save
-                        </button>
-                    </div>
-                    <small class="text-muted">Selects the graph database engine used for building and querying knowledge graphs.</small>
+                    <select class="form-select form-select-sm" id="graphEngineSelect" style="max-width:22rem;">
+                        <option value="lakebase">Lakebase (Postgres)</option>
+                    </select>
+                    <small class="text-muted d-block mt-2">
+                        Selects the graph database engine used for building and querying knowledge graphs.
+                        For <strong>Lakebase (Postgres)</strong> use the form above; <strong>Save</strong> at the top persists it.
+                        Optional raw JSON is under <em>Advanced</em> below.
+                    </small>
                 </div>
 
-                <!-- Graph DB Engine Configuration -->
-                <div class="mb-4">
-                    <label for="graphEngineConfig" class="form-label fw-semibold">
-                        Engine Configuration
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
-                            <i class="bi bi-shield-lock me-1"></i>Admin only
-                        </span>
-                    </label>
-                    <textarea class="form-control font-monospace" id="graphEngineConfig"
-                              rows="6" placeholder="{}" spellcheck="false">{}</textarea>
-                    <div class="d-flex justify-content-between align-items-start mt-2">
-                        <small class="text-muted">
-                            Engine-specific configuration as JSON. Passed to the graph DB wrapper on init.
-                            For LadybugDB an empty <code>{}</code> is sufficient.
-                        </small>
-                        <button type="button" class="btn btn-sm btn-primary ms-2" id="btnSaveGraphEngineConfig">
-                            <i class="bi bi-check-circle me-1"></i> Save
-                        </button>
+                <div class="mb-4 border rounded p-3 bg-body-secondary" id="lakebaseGraphPanel" style="display:none;">
+                    <div class="fw-semibold mb-2"><i class="bi bi-database me-1"></i> Lakebase connection</div>
+                    <p class="small text-muted mb-0">
+                        Select the Autoscaling project, branch, and database where graph triples will be stored.
+                        Use <strong>Load</strong> to discover available options from the workspace.
+                    </p>
+                    <hr class="my-3 opacity-25">
+
+                    <!-- Row 1: Project + Branch -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-12 col-lg-6">
+                            <label for="lakebaseProject" class="form-label small fw-semibold mb-1">Autoscaling project</label>
+                            <div class="input-group input-group-sm">
+                                <select class="form-select form-select-sm" id="lakebaseProject" aria-describedby="lakebaseProjectHelp">
+                                    <option value="">(click Load to discover)</option>
+                                </select>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="btnLoadLakebaseProjects" title="Load projects">
+                                    <i class="bi bi-arrow-down-circle"></i>
+                                </button>
+                            </div>
+                            <div id="lakebaseProjectHelp" class="form-text small mt-1 mb-0 text-muted">Lakebase Autoscaling project.</div>
+                        </div>
+                        <div class="col-12 col-lg-6">
+                            <label for="lakebaseBranch" class="form-label small fw-semibold mb-1">Branch</label>
+                            <select class="form-select form-select-sm" id="lakebaseBranch" disabled aria-describedby="lakebaseBranchHelp">
+                                <option value="">(select a project first)</option>
+                            </select>
+                            <div id="lakebaseBranchHelp" class="form-text small mt-1 mb-0 text-muted">Branch within the project.</div>
+                        </div>
                     </div>
-                    <div id="graphEngineConfigError" class="text-danger small mt-1" style="display:none;"></div>
-                </div>
 
-                <hr class="my-3">
+                    <!-- Row 2: Database + Schema -->
+                    <div class="row g-3">
+                        <div class="col-12 col-lg-6">
+                            <label for="lakebaseGraphDb" class="form-label small fw-semibold mb-1">Postgres database</label>
+                            <select class="form-select form-select-sm" id="lakebaseGraphDb" disabled aria-describedby="lakebaseGraphDbHelp">
+                                <option value="">(select a branch first)</option>
+                            </select>
+                            <div id="lakebaseGraphDbHelp" class="form-text small mt-2 mb-0"></div>
+                        </div>
+                        <div class="col-12 col-lg-6">
+                            <label for="lakebaseGraphSchema" class="form-label small fw-semibold mb-1">Postgres schema</label>
+                            <div class="input-group input-group-sm">
+                                <select class="form-select form-select-sm" id="lakebaseGraphSchema" disabled aria-describedby="lakebaseGraphSchemaHelp">
+                                    <option value="">(select a database first)</option>
+                                </select>
+                                <input type="text" class="form-control form-control-sm font-monospace d-none" id="lakebaseGraphSchemaInput"
+                                       value="ontobricks_graph" maxlength="63" autocomplete="off" placeholder="ontobricks_graph">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="btnToggleLakebaseSchemaInput"
+                                        title="Type schema name manually" data-mode="select">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                            </div>
+                            <div id="lakebaseGraphSchemaHelp" class="form-text small mt-2 mb-0 text-muted">
+                                Postgres schema for graph triple tables. Click <i class="bi bi-pencil"></i> to type manually.
+                            </div>
+                        </div>
+                    </div>
 
-                <p class="text-muted small mb-3">
-                    Local Graph DB files stored in <code>/tmp/ontobricks</code>.
-                    These files are automatically synced to the registry Volume when saving a domain.
-                </p>
+                    <hr class="my-3 opacity-25">
+                    <div class="fw-semibold mb-2"><i class="bi bi-lightning-charge me-1"></i> Bulk loading</div>
+                    <p class="small text-muted mb-3 mb-lg-2">
+                        Choose how R2RML triples reach Postgres. Most workspaces start with <strong>App-managed</strong>.
+                        <strong>Managed sync</strong> delegates bulk copy to Databricks Lakeflow (needs UC registration).
+                    </p>
+                    <div class="row g-3 align-items-start">
+                        <div class="col-12">
+                            <label for="lakebaseSyncMode" class="form-label small fw-semibold mb-1">Mode</label>
+                            <select class="form-select form-select-sm" id="lakebaseSyncMode" aria-describedby="lakebaseSyncModeHelp">
+                                <option value="app_managed">App-managed — stream from SQL warehouse into Postgres (default)</option>
+                                <option value="managed_synced">Managed sync — Lakeflow syncs the Delta view to Postgres (data plane)</option>
+                            </select>
+                            <div id="lakebaseSyncModeHelp" class="form-text small mt-2 mb-0">
+                                <span data-lk-mode="app_managed">The app runs the warehouse query and COPYs rows; no Unity Catalog object is required for the load.</span>
+                                <span data-lk-mode="managed_synced" class="d-none">Lakeflow keeps a synced table; the app only orchestrates. Requires a valid <code>catalog.schema</code> in Unity Catalog for registration.</span>
+                            </div>
+                        </div>
+                    </div>
 
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h6 class="mb-0"><i class="bi bi-folder2-open me-1"></i> Local Graph Files</h6>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRefreshLadybugFiles" title="Refresh file list">
-                        <i class="bi bi-arrow-clockwise"></i>
+                    <div id="lakebaseManagedSyncPanel" class="border rounded p-3 mt-3 bg-body-tertiary d-none">
+                        <div class="fw-semibold small mb-2">Managed sync options</div>
+                        <div class="row g-3">
+                            <div class="col-12 col-lg-6">
+                                <label for="lakebaseSyncTableMode" class="form-label small fw-semibold mb-1">Lakeflow schedule</label>
+                                <select class="form-select form-select-sm" id="lakebaseSyncTableMode">
+                                    <option value="snapshot">Snapshot — full refresh on trigger (good default)</option>
+                                    <option value="triggered">Triggered — refresh when you trigger</option>
+                                    <option value="continuous">Continuous — keep near real-time</option>
+                                </select>
+                                <div class="form-text small mt-1 mb-0 text-muted">How often Lakeflow updates the Postgres mirror.</div>
+                            </div>
+                            <div class="col-12 col-lg-6">
+                                <label for="lakebaseSyncTimeout" class="form-label small fw-semibold mb-1">Sync wait (seconds)</label>
+                                <input type="number" class="form-control form-control-sm" id="lakebaseSyncTimeout"
+                                       min="1" max="86400" step="1" value="600" autocomplete="off">
+                                <div class="form-text small mt-1 mb-0 text-muted">How long a build waits for a sync run to finish.</div>
+                            </div>
+                            <!-- UC Catalog -->
+                            <div class="col-12 col-lg-6">
+                                <label for="lakebaseUcCatalog" class="form-label small fw-semibold mb-1">UC catalog (sync registration)</label>
+                                <div class="input-group input-group-sm">
+                                    <select class="form-select form-select-sm" id="lakebaseUcCatalog" aria-describedby="lakebaseUcCatalogHelp">
+                                        <option value="">(click Load to discover)</option>
+                                    </select>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnLoadUcCatalogs" title="Load UC catalogs">
+                                        <i class="bi bi-arrow-down-circle"></i>
+                                    </button>
+                                </div>
+                                <div id="lakebaseUcCatalogHelp" class="form-text small mt-1 mb-0 text-muted">
+                                    UC catalog for synced table registration. If empty: Registry catalog, then domain Delta.
+                                </div>
+                                <div id="lakebaseUcCatalogLoadMsg" class="form-text small mt-1 d-none text-warning"></div>
+                            </div>
+                            <!-- UC Schema (read-only — always mirrors Postgres graph schema) -->
+                            <div class="col-12 col-lg-6">
+                                <label class="form-label small fw-semibold mb-1">UC schema (sync registration)</label>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text bg-light"><i class="bi bi-diagram-3"></i></span>
+                                    <input type="text" class="form-control form-control-sm font-monospace"
+                                           id="lakebaseUcSchemaDisplay" readonly
+                                           style="background-color:#e9ecef;"
+                                           placeholder="(same as Postgres schema)">
+                                </div>
+                                <div class="form-text small mt-1 mb-0 text-muted">
+                                    Always equals the Postgres graph schema — Lakebase places the <code>_sync</code> foreign table in the matching Postgres schema.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-3 opacity-25">
+                    <div class="fw-semibold mb-2"><i class="bi bi-heart-pulse me-1"></i> Lakebase health &amp; connection info</div>
+                    <p class="small text-muted mb-2">
+                        Read-only probe against the <strong>saved</strong> engine JSON in the registry (use <strong>Save</strong> above after edits).
+                        Confirms the App-bound Postgres instance reaches the configured database and graph schema.
+                    </p>
+                    <div id="lakebaseGraphHealthMessage" class="small mb-2" style="display:none;"></div>
+                    <dl class="row small mb-2" id="lakebaseGraphHealthDl"></dl>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRefreshLakebaseGraphHealth" title="Refresh health probe">
+                        <i class="bi bi-arrow-clockwise me-1"></i> Refresh health
                     </button>
                 </div>
 
-                <div id="ladybugFilesContainer">
-                    <div class="text-center text-muted small py-4">
-                        <span class="spinner-border spinner-border-sm me-1"></span> Loading files...
-                    </div>
-                </div>
+                <!-- Optional raw JSON (advanced) -->
+                <details class="mb-4" id="graphEngineConfigDetails">
+                    <summary class="form-label fw-semibold mb-2 user-select-none" style="cursor:pointer;">
+                        Advanced: raw engine configuration (JSON)
+                        <span class="badge bg-secondary border ms-2" style="font-size:0.65rem;">optional</span>
+                    </summary>
+                    <p class="small text-muted">Form fields above are merged into this object on <strong>Save</strong>. Edit only if you need extra keys not exposed in the UI.</p>
+                    <textarea class="form-control font-monospace" id="graphEngineConfig"
+                              rows="6" placeholder="{}" spellcheck="false">{}</textarea>
+                    <div id="graphEngineConfigError" class="text-danger small mt-2" style="display:none;"></div>
+                </details>
+
+                </div><!-- /#graphDbTabContent -->
             </div>
 
             <!-- ==================== GLOBAL TAB ==================== -->
@@ -305,22 +426,6 @@
                            min="10" step="10" value="300" style="max-width:200px;">
                     <small class="text-muted">
                         <i class="bi bi-info-circle"></i> How long the registry domain list is cached before refreshing from Databricks (minimum 10s).
-                    </small>
-                </div>
-
-                <div class="mb-4">
-                    <label class="form-label fw-semibold">
-                        CloudFetch
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
-                            <i class="bi bi-shield-lock me-1"></i>Admin only &ndash; applies to all users
-                        </span>
-                    </label>
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="cloudFetchEnabled" checked>
-                        <label class="form-check-label" for="cloudFetchEnabled">Enable CloudFetch for SQL queries</label>
-                    </div>
-                    <small class="text-muted">
-                        <i class="bi bi-info-circle"></i> Enabled by default. Disable if your Databricks App egress policy blocks CloudFetch storage endpoints.
                     </small>
                 </div>
 

@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', function () {
         rulesById = {};
         document.getElementById('scheduleIntervalValue').value = '1';
         document.getElementById('scheduleIntervalUnit').value = 'hours';
-        document.getElementById('scheduleBuildMode').value = 'full';
+
         document.getElementById('scheduleEnabled').checked = true;
         resetOutputs();
         resetVersionSelect();
@@ -259,10 +259,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         outBadges +
                         '<span class="ms-2">' + versionBadge + '</span>';
                 } else {
-                    const modeLabel = s.drop_existing
-                        ? '<span class="badge bg-warning-subtle text-warning border"><i class="bi bi-arrow-repeat me-1"></i>Full</span>'
-                        : '<span class="badge bg-info-subtle text-info border"><i class="bi bi-lightning me-1"></i>Incremental</span>';
-                    detailsCell = modeLabel + ' ' + versionBadge;
+                    detailsCell = versionBadge;
                 }
 
                 const freqLabel = formatFrequency(s.interval_minutes);
@@ -309,7 +306,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             '<button type="button" class="btn btn-sm btn-outline-secondary border-0 schedule-edit-btn" ' +
                                 dataAttrs +
                                 'data-interval="' + s.interval_minutes + '" ' +
-                                'data-drop="' + (s.drop_existing ? '1' : '0') + '" ' +
+                                'data-drop="1" ' +
                                 'data-enabled="' + (s.enabled ? '1' : '0') + '" ' +
                                 'data-version="' + escapeHtml(s.version || 'latest') + '" ' +
                                 'data-output-graph="' + (s.output_graph === false ? '0' : '1') + '" ' +
@@ -391,7 +388,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var uv = minutesToUnitValue(parseInt(btn.dataset.interval, 10));
         document.getElementById('scheduleIntervalValue').value = uv.value;
         document.getElementById('scheduleIntervalUnit').value = uv.unit;
-        document.getElementById('scheduleBuildMode').value = btn.dataset.drop === '1' ? 'full' : 'incremental';
+
         document.getElementById('scheduleEnabled').checked = btn.dataset.enabled === '1';
         var savedVersion = btn.dataset.version || 'latest';
         loadVersionsForDomain(domainName, savedVersion);
@@ -495,7 +492,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const domainName = document.getElementById('scheduleDomain').value;
         const ruleId = document.getElementById('scheduleCohortRule').value;
         const intervalMinutes = unitValueToMinutes();
-        const dropExisting = document.getElementById('scheduleBuildMode').value === 'full';
+        const dropExisting = true;
         const enabled = document.getElementById('scheduleEnabled').checked;
         const version = (document.getElementById('scheduleVersion') || {}).value || 'latest';
 

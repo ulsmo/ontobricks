@@ -1,14 +1,15 @@
 """Abstract base class for graph database backends.
 
-A graph DB backend is a local/embedded graph engine (e.g. LadybugDB, KuzuDB,
-Neo4j) used for fast Cypher queries, graph traversal, reasoning, and
-analytics.  It is **separate** from the triple store (Delta views in Unity
-Catalog), which is the permanent storage layer.
+A graph DB backend is a graph-capable triple store (e.g. Lakebase Postgres,
+or any future Cypher / Gremlin engine plugged in via ``_starter_kit/``)
+used for fast graph traversal, reasoning, and analytics.  It is
+**separate** from the triple store (Delta views in Unity Catalog),
+which is the permanent storage layer.
 
 ``GraphDBBackend`` extends ``TripleStoreBackend`` because both operate on the
 same triple data model (subject, predicate, object) and share the same named
 query interface.  The extension adds graph-specific concerns: connection
-management, schema introspection, sync to/from UC Volumes, capability flags,
+management, schema introspection, sync to/from remote storage, capability flags,
 and query-translator selection for reasoning engines.
 """
 
@@ -22,7 +23,7 @@ logger = get_logger(__name__)
 
 
 class GraphDBBackend(TripleStoreBackend):
-    """Abstract base for graph DB engines (LadybugDB, KuzuDB, Neo4j, ...).
+    """Abstract base for graph DB engines (Lakebase Postgres, KuzuDB, Neo4j, ...).
 
     Subclasses must implement the core ``TripleStoreBackend`` abstract methods
     **plus** the graph-specific abstract methods declared here.
@@ -74,7 +75,7 @@ class GraphDBBackend(TripleStoreBackend):
         """Return the node-table identifier for *table_name*.
 
         Default returns *table_name* unchanged.  Backends with naming
-        constraints (e.g. LadybugDB safe identifiers) should override.
+        constraints (reserved words, character restrictions) should override.
         """
         return table_name
 

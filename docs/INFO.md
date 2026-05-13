@@ -10,7 +10,7 @@
 
 <p align="center">
   OntoBricks is a web-based application that turns <strong>Databricks tables into a knowledge graph</strong>.<br>
-  Design ontologies using OWL or import industry standards (FIBO, CDISC, IOF&nbsp;…), map them to tables (with R2RML behind the scenes), materialize triples into a Delta or LadybugDB triple store, query them through a typed GraphQL API, and explore your knowledge graph visually.
+  Design ontologies using OWL or import industry standards (FIBO, CDISC, IOF&nbsp;…), map them to tables (with R2RML behind the scenes), materialize triples into a Delta-backed triple store mirrored on Lakebase Postgres, query them through a typed GraphQL API, and explore your knowledge graph visually.
 </p>
 
 <p align="center">
@@ -38,7 +38,7 @@ OntoBricks builds a **materialized knowledge graph** (triple store) from your Da
     │                         ▼                    │          │
     │                 ┌──────────────┐             │          │
     │                 │ Triple Store │◀────────────┘◀─────────┘
-    │                 │Delta/LadyBug│     Materialize & Query
+    │                 │ Delta + Lakebase │ Materialize & Query
     │                 └──────────────┘
     │                    │    │    │
     │               GraphQL  │  Knowledge
@@ -59,7 +59,7 @@ OntoBricks builds a **materialized knowledge graph** (triple store) from your Da
 
 1. **Design** an ontology (OWL) — visually or via LLM-powered generation
 2. **Map** ontology entities to Databricks tables using R2RML mappings
-3. **Materialize** triples into a triple store — **Delta** (SQL Warehouse) or **LadybugDB** (embedded graph database)
+3. **Materialize** triples — Delta view in Unity Catalog (governance) + Lakebase Postgres flat table (queryable Graph DB engine)
 4. **Reason** over the knowledge graph — OWL 2 RL deductive closure, SWRL rules, transitive/symmetric expansion, constraint validation, and SHACL data quality shapes
 5. **Query** the knowledge graph via GraphQL with a typed schema auto-generated from the ontology
 6. **Explore** the knowledge graph with interactive visualization, GraphiQL playground, and quality checks
@@ -110,9 +110,8 @@ Explore your knowledge graph — search, filter, and navigate entities and relat
 - **🔀 Unified Panel UI**: Consistent editing experience across Designer and Manual views
 
 ### Digital Twin (Sync & Explore)
-- **🔄 Triple Store Sync**: Synchronize mapped data to the configured triple store backend with readiness validation
-- **⚡ Incremental Sync**: Detects source data changes via Delta table version tracking and applies only the diff (additions + removals) using a server-side snapshot table — skips the build entirely when nothing changed
-- **💾 Two Backends**: **Delta** (Databricks SQL Warehouse) or **LadybugDB** (embedded Cypher-based graph database with automatic UC Volume sync)
+- **🔄 Triple Store Sync**: Synchronize mapped data to the Delta view + Graph DB engine (Lakebase) with readiness validation
+- **💾 Two Layers**: **Delta view** (Databricks SQL Warehouse, governance + lineage) plus a pluggable **Graph DB engine** (currently Lakebase Postgres — `app_managed` `COPY FROM STDIN` or `managed_synced` Lakeflow mode)
 - **📈 Knowledge Graph**: Interactive sigma.js WebGL-powered graph to explore entities and relationships visually with search, filtering, and entity detail panels
 - **🔬 Data Cluster Detection**: Detect communities in the knowledge graph using Louvain, Label Propagation, or Greedy Modularity algorithms — client-side (Graphology) for the visible subgraph, server-side (NetworkX) for the full graph; color-by-cluster visualization, adjustable resolution, cluster collapse/expand into super-nodes with member details on click
 - **🗺️ Ontology Designer Viewer**: Read-only D3.js ontology model accessible from Knowledge Graph and GraphQL sections — frozen force-directed graph with pan/zoom in a fullscreen modal
@@ -124,9 +123,9 @@ Explore your knowledge graph — search, filter, and navigate entities and relat
 
 ### Reasoning & Inference
 - **🧠 OWL 2 RL Reasoner**: Forward-chaining deductive closure on the ontology using the `owlrl` library — infers implicit class hierarchies, property entailments, and type assertions
-- **📏 SWRL Rule Engine**: User-defined Horn-clause rules (Antecedent → Consequent) with a **graphical D3-based editor** (fullscreen modal with IF/THEN atom builders, context menu, and live SWRL preview) — compiled to SQL or Cypher depending on the active backend for violation detection and triple materialization
+- **📏 SWRL Rule Engine**: User-defined Horn-clause rules (Antecedent → Consequent) with a **graphical D3-based editor** (fullscreen modal with IF/THEN atom builders, context menu, and live SWRL preview) — compiled to SQL (Spark / Postgres) for violation detection and triple materialization
 - **🔗 Graph Reasoning**: Automatic transitive closure and symmetric expansion based on OWL property characteristics (`TransitiveProperty`, `SymmetricProperty`)
-- **✔️ Constraint Validation**: Cardinality checks, functional/inverse-functional property enforcement, value constraints, orphan detection, and label requirements — executed natively in Cypher (LadybugDB) or SQL (Delta)
+- **✔️ Constraint Validation**: Cardinality checks, functional/inverse-functional property enforcement, value constraints, orphan detection, and label requirements — executed in SQL on the Delta view and the Lakebase graph engine
 - **📊 Materialization**: Inferred triples from any reasoning phase can be written back to the triple store, enriching the knowledge graph with derived facts
 
 ### GraphQL API
@@ -303,8 +302,7 @@ Domains **never** store:
 
 Synchronize, validate, and explore your knowledge graph:
 
-- **Build** your Digital Twin — creates a Triple-Store VIEW in Unity Catalog and populates the LadybugDB graph
-- **Incremental by default** — subsequent builds detect source Delta table changes and apply only the diff (see [Incremental Sync](#incremental-sync-delta-load))
+- **Build** your Digital Twin — creates a Triple-Store VIEW in Unity Catalog and mirrors the triples into the active Graph DB engine (Lakebase Postgres)
 - **Readiness Status** validates ontology, entity mappings, relationship mappings, and attribute completeness before sync
 - **Quality Checks** run asynchronously with progress tracking; validate cardinality, value constraints, property characteristics, and global rules
 - **Interactive Knowledge Graph**: Explore entities and relationships as a sigma.js WebGL graph — search, filter, click entities to see all attributes and values
@@ -403,138 +401,21 @@ canvas.addInheritance({ sourceEntityId: 'person-id', targetEntityId: 'employee-i
 
 OntoBricks goes beyond static triple storage — it brings **graph database capabilities** and **formal reasoning** directly to the Databricks Lakehouse, eliminating the need for a separate graph infrastructure.
 
-### Dual Triple Store Architecture
+### Triple Store + Graph DB Layers
 
-OntoBricks offers two interchangeable backends, each providing different graph capabilities:
+OntoBricks materializes both layers on every build, each one optimized for a different access pattern:
 
-| Capability | Delta (SQL Warehouse) | LadybugDB (Embedded Graph) |
-|------------|----------------------|---------------------------|
-| **Storage** | Delta table `(subject, predicate, object)` with Liquid Clustering | Embedded Cypher-native graph database (`real_ladybug`) |
-| **Schema** | Flat triple table | Ontology-derived typed node/relationship tables |
-| **Traversal** | SQL recursive CTEs | Native Cypher variable-length paths |
-| **Transitive closure** | `WITH RECURSIVE` CTE | Cypher `[:REL*2..N acyclic]` paths |
-| **Symmetric expansion** | SQL `NOT EXISTS` anti-join | Cypher `NOT EXISTS` subqueries |
-| **Shortest path** | Not available (too expensive in SQL) | Cypher `SHORTEST` algorithm |
-| **BFS exploration** | Recursive CTE over flat triples | Iterative Cypher expansion |
-| **Governance** | Full Unity Catalog lineage and permissions | Local disk + UC Volume sync for persistence |
+| Capability | Delta view (SQL Warehouse) | Lakebase Postgres (Graph DB engine) |
+|------------|----------------------------|-------------------------------------|
+| **Storage** | Delta view backed by R2RML SQL with Liquid Clustering | Postgres flat `(subject, predicate, object)` table on the App-bound Lakebase instance |
+| **Write path** | `CREATE OR REPLACE VIEW` | `app_managed` (`COPY FROM STDIN` + `INSERT … ON CONFLICT DO NOTHING`) or `managed_synced` (Lakeflow) |
+| **Traversal** | SQL recursive CTEs on the warehouse | Postgres recursive CTEs from the FastAPI process |
+| **Transitive closure** | `WITH RECURSIVE` CTE | `WITH RECURSIVE` CTE |
+| **Symmetric expansion** | SQL `NOT EXISTS` anti-join | SQL `NOT EXISTS` anti-join |
+| **BFS exploration** | Recursive CTE over flat triples | Recursive CTE over flat triples |
+| **Governance** | Full Unity Catalog lineage and permissions | Lakebase user role + App OAuth token |
 
-**LadybugDB Graph Model**: When an ontology is loaded, OntoBricks generates a **typed graph schema** from the OWL classes and properties — each class becomes a Cypher `NODE TABLE` with columns for its datatype properties, and each object property becomes a `REL TABLE`. This brings **property-graph semantics** to knowledge graph data that originates from relational Databricks tables.
-
-### Incremental Sync (Delta Load)
-
-By default, OntoBricks uses **incremental sync** to keep the LadybugDB graph up to date without rebuilding it from scratch on every run. This is critical for large knowledge graphs where a full rebuild is expensive in SQL Warehouse compute, wall-clock time, and graph-DB write I/O.
-
-The incremental pipeline runs in two phases:
-
-```
-Sync triggered (manual / scheduled / API)
-        │
-        ▼
- ┌─────────────────────┐
- │  Phase 1: Gate      │  DESCRIBE HISTORY on each source Delta table
- │  Version Check      │  Compare versions with stored state
- └────────┬────────────┘
-          │
-     all match? ──yes──▶ SKIP (nothing changed)
-          │ no
-          ▼
- ┌─────────────────────┐
- │  Phase 2: Diff      │  SQL EXCEPT against a snapshot table
- │  Server-Side        │  → to_add, to_remove
- └────────┬────────────┘
-          │
-          ▼
- ┌─────────────────────┐
- │  Phase 3: Apply     │  INSERT new triples, DELETE removed triples
- │  Delta to Graph     │  Refresh snapshot for next run
- └─────────────────────┘
-```
-
-#### Phase 1 — Version Gate
-
-Before any SQL is executed, OntoBricks runs `DESCRIBE HISTORY <table> LIMIT 1` on each source Delta table referenced in the R2RML entity and relationship mappings. The returned `version` number (monotonically increasing on every Delta commit) is compared to the versions stored at the previous build. If every source table version matches, the build is **skipped entirely** — no VIEW refresh, no diff, no graph writes.
-
-#### Phase 2 — Server-Side Diff via Delta Snapshot Table
-
-When source changes are detected, OntoBricks refreshes the Unity Catalog VIEW and computes a **triple-level diff** entirely server-side on the SQL Warehouse:
-
-```sql
--- Triples to ADD (present in VIEW, absent from snapshot)
-SELECT subject, predicate, object FROM <view>
-EXCEPT
-SELECT subject, predicate, object FROM <snapshot>
-
--- Triples to REMOVE (present in snapshot, absent from VIEW)
-SELECT subject, predicate, object FROM <snapshot>
-EXCEPT
-SELECT subject, predicate, object FROM <view>
-```
-
-The **snapshot table** (`_ob_snapshot_<project>`) is a managed Delta table in the same catalog/schema as the VIEW. It stores the full set of triples from the previous successful build and is refreshed (`CREATE OR REPLACE TABLE ... AS SELECT`) after every build.
-
-#### Phase 3 — Apply Delta to Graph
-
-Only the diff is applied to LadybugDB:
-
-- **Removals** are processed first — relationships are deleted, then attribute values nulled, then orphaned nodes detached and removed
-- **Additions** are inserted using the same batch pipeline as a full build
-
-#### Fallback to Full Rebuild
-
-Incremental sync gracefully falls back to a full rebuild when:
-
-| Condition | Reason |
-|-----------|--------|
-| Ontology or mappings changed | Schema changes invalidate the existing graph structure |
-| No snapshot table exists | First build for this domain — must create baseline |
-| Diff exceeds 80% of total triples | Incremental overhead is worse than a full reload |
-| User selects "Full rebuild" in UI | Explicit opt-in to drop and recreate |
-| Any error during incremental path | Safety net — never leaves the graph in a partial state |
-
-#### Build Modes in the UI
-
-The Digital Twin **Status** page offers two build modes:
-
-| Mode | Behaviour |
-|------|-----------|
-| **Incremental** (default) | Version gate + diff — only changed triples are written |
-| **Full rebuild** | Drops the graph and re-inserts all triples from the VIEW |
-
-The **Triple-Store Digital Twin** card shows the snapshot table status below the VIEW name. A **Drop** button lets you delete the snapshot to force the next build to be a full rebuild.
-
-#### API
-
-The REST API accepts a `build_mode` parameter:
-
-```json
-POST /api/v1/digitaltwin/build?project_name=my_project
-Content-Type: application/json
-
-{ "build_mode": "incremental" }
-```
-
-Possible values: `"incremental"` (default), `"full"`.
-
-The build result includes incremental metadata:
-
-```json
-{
-  "build_mode": "incremental",
-  "diff": { "added": 120, "removed": 15 },
-  "triple_count": 50000,
-  "duration_seconds": 4.2
-}
-```
-
-When skipped:
-
-```json
-{
-  "build_mode": "skipped",
-  "skipped_reason": "No source table changes detected",
-  "duration_seconds": 0.8
-}
-```
+The Graph DB layer is pluggable behind `GraphDBBackend` and `GraphDBFactory`. Lakebase Postgres ships today; the abstraction's capability flags (`supports_cypher`, `is_cypher_backend`, `query_dialect`) reserve a slot for plugging in a future Cypher / Gremlin engine — see `docs/graphdb-integration.md` for the integration template.
 
 ### Reasoning Engine
 
@@ -551,8 +432,8 @@ OntoBricks implements a **multi-phase reasoning pipeline** (`src/back/core/reaso
     └──────────┘   └──────────┘   └──────────┘   └──────────────┘
     Forward-chain   Violation &    Transitive     Cardinality,
     deductive       materializ.    closure,       functional,
-    closure on      via SQL or     symmetric      value checks,
-    ontology        Cypher         expansion      global rules
+    closure on      via SQL on     symmetric      value checks,
+    ontology        Delta+Lakebase expansion      global rules
 ```
 
 #### Phase 1: T-Box Reasoning (OWL 2 RL)
@@ -571,10 +452,9 @@ OntoBricks uses the **OWL 2 RL** (Rule Language) profile — a decidable subset 
 OntoBricks includes a **SWRL (Semantic Web Rule Language)** engine that supports user-defined rules with a visual editor:
 
 - **Rule format**: Horn-clause style — `Antecedent → Consequent` with class atoms (`Person(?x)`) and property atoms (`worksIn(?x, ?y)`)
-- **Dual execution**: Rules are compiled to **SQL** (for Delta backend) or **Cypher** (for LadybugDB) depending on the active triple store
+- **SQL execution**: Rules are compiled by `SWRLSQLTranslator` to Spark SQL (Delta view) and Postgres SQL (Lakebase Graph DB). The capability flags on `GraphDBBackend` reserve a slot for plugging in a Cypher / Gremlin translator if a future engine needs it.
 - **Violation detection**: Finds instances where the antecedent holds but the consequent does not (`NOT EXISTS` patterns)
 - **Materialization**: Optionally inserts inferred consequent triples back into the store
-- **Graph-aware translation**: When running on LadybugDB with a typed graph schema, the Cypher translator uses the ontology-derived node/relationship tables for efficient pattern matching
 
 #### Phase 3: Graph Reasoning
 
@@ -596,7 +476,7 @@ Validates instance data against formal ontology constraints:
 | **Value constraints** | `notNull`, `startsWith`, `endsWith`, `contains`, `equals`, `matches` (regex) |
 | **Global rules** | `noOrphans` (every subject has `rdf:type`), `requireLabels` (every typed entity has `rdfs:label`) |
 
-Constraint checking runs natively in **Cypher** on LadybugDB or as **quality SQL** on the Delta backend.
+Constraint checking runs as quality SQL on the Delta view and on the Lakebase Graph DB. A future Cypher / Gremlin engine could re-enable native constraint checks via `GraphDBBackend`.
 
 ### From Relational to Graph — Without Leaving Databricks
 
@@ -604,10 +484,10 @@ The key insight behind OntoBricks is that you **don't need a separate graph data
 
 1. **OWL ontologies** for formal schema definition
 2. **R2RML mappings** for relational-to-graph transformation
-3. **Delta Lake** for governed triple storage (or LadybugDB for embedded graph power)
+3. **Delta Lake** for governed triple storage, mirrored on **Lakebase Postgres** for low-latency graph reads
 4. **OWL 2 RL reasoning** for ontology-level inference
 5. **SWRL rules** for domain-specific logic
-6. **Graph algorithms** (transitive closure, BFS, shortest path) via SQL CTEs or Cypher
+6. **Graph algorithms** (transitive closure, BFS, shortest path) via SQL recursive CTEs on both layers
 
 ...OntoBricks delivers a **complete knowledge graph platform** that runs entirely on Databricks infrastructure.
 
@@ -627,7 +507,7 @@ OntoBricks leverages these W3C and semantic web standards:
 | **SHACL** | Shapes Constraint Language — data quality shapes for validating RDF graphs |
 | **GraphQL** | Client-facing query language with typed schema auto-generated from the ontology |
 | **Turtle** | Serialization format for OWL and R2RML files |
-| **Cypher** | Graph query language — used by LadybugDB backend for native graph operations |
+| **Cypher** *(reserved)* | Graph query language — capability flag on `GraphDBBackend` is kept as a seam for plugging in a future Cypher engine; not used by any currently shipped engine |
 
 ## Documentation
 
@@ -636,7 +516,7 @@ Documentation is grouped by topic in [`docs/`](docs/README.md):
 - **[Get started](docs/get-started.md)** — install, configure, environment variables
 - **[User guide](docs/user-guide.md)** — features, automated pipeline, ontology import
 - **[Deployment](docs/deployment.md)** — Apps, resources, MCP server
-- **[Architecture](docs/architecture.md)** — design, OntoViz, agentic stack, incremental sync spec
+- **[Architecture](docs/architecture.md)** — design, OntoViz, agentic stack, triple-store + Graph DB layers
 - **[API](docs/api.md)** — external REST/GraphQL and internal REST reference
 - **[MCP](docs/mcp.md)** — Playground and client configuration
 - **[Development](docs/development.md)** — dependencies, testing, SDK notes
@@ -664,9 +544,9 @@ make help
 | Layer | Technologies |
 |-------|-------------|
 | **Backend** | Python 3.10+, FastAPI 0.109+, Uvicorn, RDFLib 7.0, Strawberry GraphQL |
-| **Reasoning** | owlrl 7.0+ (OWL 2 RL forward chaining), PySHACL 0.26+ (SHACL validation), custom SWRL engine (SQL + Cypher translators) |
+| **Reasoning** | owlrl 7.0+ (OWL 2 RL forward chaining), PySHACL 0.26+ (SHACL validation), custom SWRL engine (SQL translator) |
 | **Graph Analysis** | NetworkX 3.0+ (community detection: Louvain, Label Propagation, Greedy Modularity), Graphology communities-louvain (client-side) |
-| **Graph** | LadybugDB / real_ladybug (embedded Cypher graph DB), Cypher query language, typed node/rel tables |
+| **Graph DB** | Lakebase Postgres flat triple table (`psycopg`, `COPY FROM STDIN`, optional Lakeflow synced-table mode); pluggable behind `GraphDBBackend` for future Cypher / Gremlin engines |
 | **Frontend** | Bootstrap 5.3, Sigma.js 3.x, Graphology, D3.js 7.x, OntoViz, Vanilla JS |
 | **Data** | Databricks SQL Connector, Unity Catalog, Delta Lake |
 | **Agents & Observability** | MLflow 2.19+ (tracing, ResponsesAgent, Databricks Agent Framework) |
@@ -692,7 +572,8 @@ MIT License - see [LICENSE](LICENSE)
 - **[RDFLib](https://rdflib.readthedocs.io/)** - Python library for RDF
 - **[owlrl](https://owl-rl.readthedocs.io/)** - OWL 2 RL reasoner for RDFLib (forward-chaining deductive closure)
 - **[PySHACL](https://github.com/RDFLib/pySHACL)** - SHACL validator for RDFLib graphs (data quality shapes)
-- **[LadybugDB (real_ladybug)](https://pypi.org/project/real-ladybug/)** - Embedded graph database with Cypher support
+- **[psycopg](https://www.psycopg.org/psycopg3/)** - Postgres driver used by the Lakebase Graph DB engine
+- **[Databricks Lakebase](https://docs.databricks.com/aws/en/oltp/)** - Databricks-hosted Postgres for OLTP / Apps
 - **[MLflow](https://mlflow.org/)** - ML lifecycle platform (agent tracing & evaluation)
 - **[Model Context Protocol](https://modelcontextprotocol.io/)** - Open standard for LLM tool integration
 

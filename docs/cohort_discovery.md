@@ -210,9 +210,10 @@ historical rules transparently.
 The engine (`back/core/graph_analysis/CohortBuilder.py`) is **backend-
 agnostic**: it talks to the triplestore exclusively through
 `store.query_triples(graph_name)` and `store.insert_triples(...)`, which
-work on every supported backend (Delta + Spark SQL, LadybugDB + Cypher).
-All higher-level filtering, edge construction, and grouping happens in
-pure Python — same approach as `CommunityDetector`.
+work on every supported backend (Delta + Spark SQL, Lakebase Postgres SQL,
+or any future Cypher / Gremlin engine added through `GraphDBFactory`). All
+higher-level filtering, edge construction, and grouping happens in pure
+Python — same approach as `CommunityDetector`.
 
 The pipeline has six stages, in order:
 
@@ -237,8 +238,8 @@ counters and the Why? explainer:
 | `sample_property_values(class_uri, property_uri, limit)` | `value_equals` picker. |
 | `explain_membership(rule, target_uri)` | Why? / Why not? per-stage trace. |
 
-For algorithmic detail (SQL/Cypher dispatch, complexity, schema-drift
-handling, worked example), see
+For algorithmic detail (SQL dispatch, complexity, schema-drift handling,
+worked example), see
 [`releasereq/cohort_design.md` §9](../releasereq/cohort_design.md).
 
 ---
@@ -253,8 +254,10 @@ A re-materialise of a saved rule:
    `:inCohort<RuleId>` (rule-scoped, so multiple rules can co-exist in
    the same graph without sharing a predicate column).  SQL backends use
    `DELETE FROM ... WHERE subject LIKE 'prefix%' OR (predicate =
-   '<inCohort<RuleId>>' AND object LIKE 'prefix%')`; LadybugDB overrides
-   with two `MATCH ... DELETE` Cypher passes.
+   '<inCohort<RuleId>>' AND object LIKE 'prefix%')` on every shipped engine
+   (Spark SQL on Delta, Postgres SQL on Lakebase). A future Cypher /
+   Gremlin engine can override `delete_cohort_triples` to provide its own
+   native pass.
 2. Wipes the rule's old Delta-table partition via
    `DELETE FROM <fq> WHERE rule_id = ?`.
 3. Re-inserts fresh rows — content-hash URIs are stable, so unchanged

@@ -612,8 +612,16 @@ class SWRLSQLTranslator:
             )
 
         primary_var = class_atoms[0]["args"][0]
-        primary_props = [p for p in prop_atoms if p["args"][0] == primary_var]
-        if not primary_props:
+
+        # Traverse ALL property atoms reachable from primary_var (BFS), not
+        # only the direct ones.  This is necessary for chained rules such as
+        # P(?x, ?y) ∧ Q(?y, ?z) → R(?x, ?z) where ?z is two hops away.
+        connected = SWRLParser.find_connected_vars(primary_var, prop_atoms)
+        connected_props = SWRLParser.order_connected_props(
+            primary_var,
+            [p for p in prop_atoms if p["args"][0] in connected and p["args"][1] in connected],
+        )
+        if not connected_props:
             return None
 
         alias_counter = 0
@@ -638,28 +646,41 @@ class SWRLSQLTranslator:
 
         join_parts: List[str] = []
 
-        for prop in primary_props:
+        for prop in connected_props:
             p_uri = self._escape(
                 SWRLParser.resolve_uri(prop["name"], base_uri, uri_map),
             )
+            subj_var = prop["args"][0]
             obj_var = prop["args"][1]
             a_prop = _next()
+
+            if subj_var in var_bindings:
+                anchor = f"AND {a_prop}.subject = {_ref(subj_var)}"
+                new_var, new_col = obj_var, "object"
+            elif obj_var in var_bindings:
+                anchor = f"AND {a_prop}.object = {_ref(obj_var)}"
+                new_var, new_col = subj_var, "subject"
+            else:
+                continue  # not yet reachable — ordering should prevent this
+
             join_parts.append(
                 f"JOIN {table} {a_prop} "
                 f"ON {a_prop}.predicate = '{p_uri}' "
-                f"AND {a_prop}.subject = {_ref(primary_var)}"
+                f"{anchor}"
             )
-            if obj_var in var_class:
-                a_cls = _next()
-                join_parts.append(
-                    f"JOIN {table} {a_cls} "
-                    f"ON {a_cls}.predicate = '{RDF_TYPE}' "
-                    f"AND {a_cls}.object = '{var_class[obj_var]}' "
-                    f"AND {a_cls}.subject = {a_prop}.object"
-                )
-                var_bindings[obj_var] = (a_cls, "subject")
-            else:
-                var_bindings[obj_var] = (a_prop, "object")
+
+            if new_var not in var_bindings:
+                if new_var in var_class:
+                    a_cls = _next()
+                    join_parts.append(
+                        f"JOIN {table} {a_cls} "
+                        f"ON {a_cls}.predicate = '{RDF_TYPE}' "
+                        f"AND {a_cls}.object = '{var_class[new_var]}' "
+                        f"AND {a_cls}.subject = {a_prop}.{new_col}"
+                    )
+                    var_bindings[new_var] = (a_cls, "subject")
+                else:
+                    var_bindings[new_var] = (a_prop, new_col)
 
         selects: List[str] = []
         for atom in cons_atoms:

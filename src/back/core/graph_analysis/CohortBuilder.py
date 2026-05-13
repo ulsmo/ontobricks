@@ -235,16 +235,67 @@ class CohortBuilder:
             variants.add(self._to_ontology_uri(class_uri))
         return {v for v in variants if v}
 
+    def _predicate_alias_map(self) -> Dict[str, str]:
+        """Build ``{local_name → canonical_data_namespace_uri}`` from cached triples.
+
+        Scans every non-``rdf:type`` predicate that is already in the
+        data namespace and maps its local name back to its full data-URI.
+        Used by :meth:`_resolve_predicate` to bridge foreign namespaces
+        where ``_to_data_uri`` cannot rewrite (different base prefixes).
+
+        Result is cached in ``self._cache["predicate_alias"]`` for the
+        lifetime of this builder instance.
+        """
+        cached = self._cache.get("predicate_alias")
+        if cached is not None:
+            return cached
+        data_ns = self._data_namespace()
+        alias: Dict[str, str] = {}
+        for t in (self._cache.get("triples") or []):
+            pred = t.get("predicate")
+            if not pred or pred == RDF_TYPE:
+                continue
+            if data_ns and pred.startswith(data_ns):
+                local = pred[len(data_ns):]
+                if local and local not in alias:
+                    alias[local] = pred
+        self._cache["predicate_alias"] = alias
+        return alias
+
+    def _resolve_predicate(self, uri: str) -> str:
+        """Resolve *uri* to its canonical data-namespace form.
+
+        1. Tries :meth:`_to_data_uri` (handles same-namespace ``#``→``/``
+           rewrites for URIs sharing ``base_uri``).
+        2. If the URI is unchanged (foreign namespace or already in data
+           form), falls back to local-name matching against all predicates
+           actually present in the loaded data — the same strategy
+           :class:`SWRLSQLTranslator` uses via
+           ``_predicate_local_name_key``.
+        """
+        if not uri:
+            return uri
+        rewritten = self._to_data_uri(uri)
+        if rewritten != uri:
+            return rewritten
+        local = extract_local_name(uri)
+        if local:
+            alias = self._predicate_alias_map()
+            resolved = alias.get(local)
+            if resolved:
+                return resolved
+        return uri
+
     def _normalized_links(self, links: List[CohortLink]) -> List[CohortLink]:
         """Return a copy of *links* with every hop's ``via`` and
         ``where[*].property`` rewritten to the data namespace.
         ``target_class`` is left alone — class URIs use the ontology
         form on both sides.
 
-        Uses :meth:`_resolve_predicate` instead of :meth:`_to_data_uri`
-        so that predicates from a foreign namespace (e.g. the shared
-        OntoBricks vocabulary namespace) are resolved via local-name
-        alias against the triples actually present in the graph.
+        Uses :meth:`_resolve_predicate` (not the bare ``_to_data_uri``)
+        so foreign-namespace predicates (e.g. ``ontobricks.com/ontology#hasClaim``
+        in a domain whose base is ``databricks-ontology.com/…``) are
+        resolved by local-name alias against the actual data triples.
         """
         if not self._base_uri:
             return list(links)
@@ -816,13 +867,14 @@ class CohortBuilder:
     ) -> Dict[Tuple[str, str], List[str]]:
         """Index ``(subject, predicate) -> [object, …]`` for path walking.
 
-        Predicates are normalised to the data-namespace form via
-        :meth:`_to_data_uri` so that lookups using the normalised ``via``
-        predicate (from :meth:`_normalized_links`) always resolve correctly,
-        regardless of which namespace form the triple store uses.  This
-        matters when data was loaded outside the R2RML pipeline (e.g. direct
-        insert, W3C OWL import) where ontology-namespace predicates (``…#name``)
-        can appear instead of the expected data-namespace form (``…/name``).
+        Every predicate is normalised to the data namespace via
+        :meth:`_resolve_predicate` before being used as an index key.
+        This ensures that data loaded outside R2RML (direct inserts,
+        W3C OWL round-trips, manual loads) — where predicates may be
+        in ontology form (``…#hasClaim``) or in a foreign namespace —
+        is indexed under the same key that the path walker looks up
+        (data form ``…/hasClaim``), preventing the silent-zero-neighbour
+        bug reported in cohort rules like ``ElectricitySuspended``.
         """
         idx: Dict[Tuple[str, str], List[str]] = {}
         for t in triples:
@@ -833,7 +885,7 @@ class CohortBuilder:
             obj = t.get("object")
             if obj is None:
                 continue
-            norm_pred = self._to_data_uri(pred)
+            norm_pred = self._resolve_predicate(pred)
             idx.setdefault((subj, norm_pred), []).append(obj)
         return idx
 

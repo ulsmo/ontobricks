@@ -11,13 +11,15 @@ to operate correctly:
 * SQL warehouse — TCP/SQL reachability via ``SELECT 1``;
 * CloudFetch capability — connector prerequisites and lightweight
   runtime probe for ``use_cloud_fetch=True``;
-* registry **UC volume** — Files-API read + write probe (a tiny
-  sentinel file is written then deleted);
+* registry **UC volume** (binaries only) — Files-API read + write probe
+  (a tiny sentinel file is written then deleted);
 * registry **catalog/schema** — DDL probe via
   ``CREATE OR REPLACE VIEW <fqn> AS SELECT 1`` then ``DROP VIEW`` so
   view materialisation will succeed during Digital-Twin builds;
-* **Lakebase** — when ``PG*`` env vars are bound, connectivity/init
-  checks plus explicit schema/table/sequence permission probes.
+* **Lakebase** — connectivity/init checks plus explicit schema/table/
+  sequence permission probes. When ``PG*`` env vars are unset the
+  registry is unavailable (Lakebase is the sole structured-data
+  backend since v0.4.0), so the probes report a warning.
 
 Each probe returns ``{name, label, status, detail, duration_ms}``;
 the top-level ``status`` is the worst severity across all probes.
@@ -251,7 +253,8 @@ def _check_registry_cfg(settings: Settings) -> Tuple[str, str]:
         )
     return (
         _OK,
-        f"Backend={cfg.backend} catalog={cfg.catalog} schema={cfg.schema} volume={cfg.volume}",
+        f"catalog={cfg.catalog} schema={cfg.schema} volume={cfg.volume} "
+        f"lakebase_schema={cfg.lakebase_schema}",
     )
 
 
@@ -342,6 +345,75 @@ def _check_registry_uc_schema_ddl() -> Tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Graph DB (Lakebase graph schema) probe
+# ---------------------------------------------------------------------------
+
+
+def _check_graphdb_lakebase(settings: Settings) -> Tuple[str, str]:
+    """Probe the configured Graph DB Lakebase database and graph schema.
+
+    Reads ``graph_engine_config`` from the registry global-config to
+    discover the graph database/schema. When nothing is configured the
+    probe reports a warning rather than an error.
+    """
+    from back.core.databricks.LakebaseAuth import get_lakebase_auth
+
+    auth = get_lakebase_auth()
+    if not auth.is_available:
+        return (
+            _WARNING,
+            "Lakebase not bound (PG* env vars unset) — Graph DB not probed",
+        )
+
+    cfg = _resolve_registry_cfg(settings)
+    try:
+        from back.objects.registry.store import RegistryFactory
+
+        store = RegistryFactory.from_cfg(cfg)
+        global_cfg = store.load_global_config()
+        engine_cfg = global_cfg.get("graph_engine_config") or {}
+    except Exception as exc:  # noqa: BLE001
+        return _WARNING, f"Could not load graph engine config: {exc}"
+
+    database = (engine_cfg.get("database") or "").strip()
+    schema = (engine_cfg.get("schema") or engine_cfg.get("graph_schema") or "ontobricks_graph").strip()
+
+    if not schema:
+        return _WARNING, "Graph DB schema not configured — set it in Settings → Graph DB"
+
+    try:
+        from back.core.graphdb.lakebase.LakebaseBase import (
+            default_schema,
+            validate_graph_schema,
+        )
+        from back.objects.registry.store.lakebase.store import LakebaseRegistryStore
+
+        graph_store = LakebaseRegistryStore(
+            registry_cfg=cfg,
+            schema=schema,
+            database=database,
+        )
+        with graph_store._connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT current_database(), current_user")
+            row = cur.fetchone() or ("?", "?")
+            cur_db, cur_user = row[0], row[1]
+            cur.execute(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = %s)",
+                (schema,),
+            )
+            schema_exists = bool((cur.fetchone() or [False])[0])
+        if schema_exists:
+            return _OK, f"Graph DB reachable — db={cur_db} schema={schema} user={cur_user}"
+        return (
+            _WARNING,
+            f"Graph DB connected (db={cur_db}) but schema '{schema}' does not exist yet — "
+            "run a Digital Twin build to create it",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _ERROR, f"Graph DB probe failed (database={database or 'default'}, schema={schema}): {exc}"
+
+
+# ---------------------------------------------------------------------------
 # Lakebase probe
 # ---------------------------------------------------------------------------
 
@@ -352,8 +424,10 @@ def _check_lakebase(settings: Settings) -> Tuple[str, str]:
     auth = get_lakebase_auth()
     if not auth.is_available:
         return (
-            _OK,
-            "Lakebase not bound (PG* env vars unset) — registry uses Volume backend",
+            _WARNING,
+            "Lakebase not bound (PG* env vars unset) — registry is unavailable; "
+            "set PGHOST/PGPORT/PGUSER/PGDATABASE in .env (local) or bind a database "
+            "resource in app.yaml (deployed)",
         )
 
     cfg = _resolve_registry_cfg(settings)
@@ -384,7 +458,7 @@ def _check_lakebase_permissions(settings: Settings) -> Tuple[str, str]:
     auth = get_lakebase_auth()
     if not auth.is_available:
         return (
-            _OK,
+            _WARNING,
             "Lakebase not bound (PG* env vars unset) — permission checks skipped",
         )
 
@@ -586,6 +660,13 @@ def run_readiness_checks(settings: Optional[Settings] = None) -> Dict[str, Any]:
             "lakebase.permissions",
             "Lakebase permissions",
             lambda: _check_lakebase_permissions(settings),
+        )
+    )
+    checks.append(
+        _safely_run(
+            "graphdb.lakebase",
+            "Graph DB (Lakebase)",
+            lambda: _check_graphdb_lakebase(settings),
         )
     )
 

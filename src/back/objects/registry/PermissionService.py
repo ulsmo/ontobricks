@@ -329,12 +329,18 @@ class PermissionService:
 
     @staticmethod
     def _store_for(host: str, token: str, registry_cfg: Dict[str, str]):
-        """Build the right :class:`RegistryStore` for *registry_cfg*."""
+        """Build the Lakebase :class:`RegistryStore` for *registry_cfg*.
+
+        ``host``/``token`` are accepted for signature compatibility with
+        the call sites that still thread them through; Lakebase uses
+        its own PG*/JWT credentials so they are ignored.
+        """
         from back.objects.registry import RegistryCfg
         from back.objects.registry.store import RegistryFactory
 
+        del host, token
         cfg = RegistryCfg.from_dict(registry_cfg)
-        return RegistryFactory.from_cfg(cfg, host=host, token=token)
+        return RegistryFactory.from_cfg(cfg)
 
     def load_domain_permissions(
         self,

@@ -27,7 +27,7 @@
 - **R2RML Generation**: Automatic generation of W3C-compliant R2RML mappings from visual configuration.
 
 ## Digital Twin (Sync & Explore)
-- **Two Backends**: Choose between **Delta Lake** (SQL Warehouse) and **LadybugDB** (embedded Cypher-based graph database) as the triple store backend per project.
+- **Two Layers**: Every build materializes a Delta view (Unity Catalog, governance) and a Graph DB engine (Lakebase Postgres today; pluggable behind `GraphDBFactory`).
 - **Readiness Status**: Validates ontology, entity mappings, relationship mappings, and attribute mapping completeness before enabling sync and explore actions.
 - **Triple Store Sync**: Synchronize generated triples to a Unity Catalog table — SQL is generated automatically from R2RML mappings (no manual query writing required).
 - **Last Updated Timestamp**: Triple store status displays the last modification date and time retrieved from Unity Catalog Delta table metadata (`DESCRIBE DETAIL`).
@@ -45,7 +45,7 @@
 - **Version Control**: Create, list, and load multiple versions of a project with automatic versioning. Which version is **Active** (exposed via API / MCP) is managed from **Registry → Browse**; the Domain → Versions page shows that status as a read-only badge.
 - **Domain Cockpit (Validation)**: Readiness tiles including **Active Version** — the version currently exposed via API/MCP (from the registry), with a *(not loaded)* hint when it differs from the version open in the session. Distinct from “latest on disk” vs read-only UI gating (still driven by whether the loaded version is the latest).
 - **New-domain loading**: After **New Domain** from the navbar, a full-page spinner runs until Domain Information has finished its initial fetches (LLM endpoints, version status, domain info).
-- **Domain Information — Digital Twin fields**: Triple-store FQN, snapshot table name, and local Ladybug path refresh when the domain name is **committed** (blur / `change`) or the version changes, so previews match naming rules before save.
+- **Domain Information — Digital Twin fields**: Triple-store FQN and Graph DB table name (e.g. Lakebase `g_<domain>_v<version>`) refresh when the domain name is **committed** (blur / `change`) or the version changes, so previews match naming rules before save.
 - **Duplicate domain names**: Save to registry is blocked when the sanitized name already exists (`/domain/check-name` + guard on **Save to UC**); inline validation clears when the name is cleared or the check errors.
 - **Navbar domain identity**: Top bar name/version invalidate cached `/navbar/state` (and related caches) after domain mutations so reloads and navigations do not show stale labels for up to 15 seconds.
 - **Import/Export**: Import OWL and RDFS ontologies, import industry-standard ontologies (FIBO, CDISC, IOF), import/export R2RML mappings, and export OWL files.

@@ -444,6 +444,8 @@ const ReasoningModule = {
             if (data.materialize_graph_count != null || data.materialize_graph_error) {
                 if (data.materialize_graph_error) {
                     lines.push(`<span class="badge bg-danger">Error</span> Graph: ${this._esc(data.materialize_graph_error)}`);
+                } else if (data.materialize_graph_count === 0) {
+                    lines.push(`<span class="badge bg-warning text-dark">Warning</span> 0 triples appended to graph — inferred triples may use non-HTTP(S) URIs (e.g. <code>urn:</code>) which are excluded from the graph write.`);
                 } else {
                     lines.push(`<span class="badge bg-success">OK</span> ${data.materialize_graph_count} triples appended to graph`);
                 }
@@ -456,6 +458,18 @@ const ReasoningModule = {
                 showNotification('Materialisation completed!', 'success');
             btn.disabled = true;
             btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Materialised';
+
+            if (graphChecked && data.materialize_graph_count > 0) {
+                if (typeof SigmaGraph !== 'undefined' && typeof SigmaGraph.refreshCurrentExpansion === 'function') {
+                    const refreshed = await SigmaGraph.refreshCurrentExpansion();
+                    if (!refreshed && area) {
+                        const hint = document.createElement('div');
+                        hint.className = 'small text-muted mt-1';
+                        hint.innerHTML = '<i class="bi bi-info-circle me-1"></i>Open the <strong>Knowledge Graph</strong> tab and run a filter to see the new triples.';
+                        area.appendChild(hint);
+                    }
+                }
+            }
             return;
         } catch (err) {
             console.error('Materialise error:', err);

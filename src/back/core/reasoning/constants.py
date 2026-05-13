@@ -88,19 +88,6 @@ DT_OP_SQL = {
     "any": None,
 }
 
-DT_OP_CYPHER = {
-    "eq": "= {v}",
-    "neq": "<> {v}",
-    "gt": "> {v}",
-    "gte": ">= {v}",
-    "lt": "< {v}",
-    "lte": "<= {v}",
-    "startsWith": "STARTS WITH {v}",
-    "endsWith": "ENDS WITH {v}",
-    "contains": "CONTAINS {v}",
-    "any": None,
-}
-
 # ---------------------------------------------------------------------------
 # SPARQL CONSTRUCT regexes
 # ---------------------------------------------------------------------------
@@ -129,14 +116,3 @@ NS_PREFIX_MAP = {
     "xsd": "http://www.w3.org/2001/XMLSchema#",
 }
 
-# ---------------------------------------------------------------------------
-# Constraint-check skip types
-# ---------------------------------------------------------------------------
-
-CONSTRAINT_SKIP_TYPES = {
-    "transitive",
-    "symmetric",
-    "asymmetric",
-    "reflexive",
-    "irreflexive",
-}

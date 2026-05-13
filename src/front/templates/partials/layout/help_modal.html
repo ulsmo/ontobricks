@@ -276,7 +276,7 @@
                                                 <li><strong>Knowledge Graph</strong> &mdash; interactive sigma.js WebGL graph. Search, filter, detect clusters (Louvain / Label Propagation / Greedy Modularity), color-by-cluster, collapse into super-nodes</li>
                                                 <li><strong>GraphQL</strong> &mdash; auto-generated GraphQL playground for programmatic access</li>
                                                 <li><strong>Data Quality</strong> &mdash; run SHACL / constraint validation against the triple store</li>
-                                                <li><strong>Inference</strong> &mdash; OWL 2 RL &amp; SWRL reasoning on Delta (SQL) or LadybugDB (Cypher)</li>
+                                                <li><strong>Inference</strong> &mdash; OWL 2 RL &amp; SWRL reasoning on Delta / Lakebase (SQL)</li>
                                             </ul>
                                             <p>A <em>Readiness Status</em> indicator tells you when ontology &amp; mapping are both ready to sync.</p>
                                         </div>
@@ -322,7 +322,7 @@
                                     <div class="help-feature">
                                         <div class="help-feature-icon"><i class="bi bi-lightning"></i></div>
                                         <h5>SWRL Reasoning</h5>
-                                        <p>Graphical D3 rule editor. Rules compile to SQL (Delta) or Cypher (LadybugDB). Per-rule progress tracking during inference.</p>
+                                        <p>Graphical D3 rule editor. Rules compile to SQL (Delta or Lakebase). Per-rule progress tracking during inference.</p>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
@@ -343,7 +343,7 @@
                                     <div class="help-feature">
                                         <div class="help-feature-icon"><i class="bi bi-cloud-arrow-up"></i></div>
                                         <h5>Unity Catalog first</h5>
-                                        <p>All domains are stored in UC volumes; triples land in Delta tables (or LadybugDB triple store). Incremental sync by default.</p>
+                                        <p>All domains are stored in UC volumes; triples land in Delta tables and the configured graph backend (Lakebase). Incremental sync by default.</p>
                                     </div>
                                 </div>
                             </div>
@@ -364,7 +364,7 @@
                                 </div>
                                 <div class="accordion-item">
                                     <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq3">Which triple store backends are supported?</button></h2>
-                                    <div id="faq3" class="accordion-collapse collapse" data-bs-parent="#helpFaqAccordion"><div class="accordion-body">Two backends: <strong>Delta</strong> (native Unity Catalog, best for large volumes and SQL integration) and <strong>LadybugDB</strong> (property graph, supports Cypher). Pick the backend in <em>Settings</em>.</div></div>
+                                    <div id="faq3" class="accordion-collapse collapse" data-bs-parent="#helpFaqAccordion"><div class="accordion-body">Persistent storage uses <strong>Delta</strong> (native Unity Catalog, best for large volumes and SQL integration). The configured <strong>Graph DB</strong> backend (currently <strong>Lakebase</strong> Postgres) is used for graph queries and reasoning. Pick the engine in <em>Settings</em>.</div></div>
                                 </div>
                                 <div class="accordion-item">
                                     <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq4">Why do I see grey/disabled menu items?</button></h2>
@@ -415,7 +415,7 @@
                             </div>
                             <div class="help-trouble">
                                 <h5><i class="bi bi-exclamation-circle text-warning me-2"></i>&ldquo;Sync is very slow.&rdquo;</h5>
-                                <p>Large mappings benefit from a larger SQL Warehouse. Also check that your mappings are reasonable SQL (avoid unnecessary cross-joins). Sync is incremental by default &mdash; only changed data is materialized.</p>
+                                <p>Large mappings benefit from a larger SQL Warehouse. Also check that your mappings are reasonable SQL (avoid unnecessary cross-joins). Data movement is handled by Databricks Lakeflow synced tables.</p>
                             </div>
                             <div class="help-trouble">
                                 <h5><i class="bi bi-exclamation-circle text-warning me-2"></i>&ldquo;Session state leaked after switching domains.&rdquo;</h5>
@@ -468,7 +468,8 @@
                                 <dt>SWRL</dt><dd>Semantic Web Rule Language &mdash; &ldquo;IF ... THEN ...&rdquo; inference rules.</dd>
                                 <dt>Digital Twin</dt><dd>A materialized, queryable knowledge graph representation of your Databricks data.</dd>
                                 <dt>Bridge</dt><dd>Cross-domain link between entities of two different domains.</dd>
-                                <dt>Triple Store</dt><dd>Backend where triples are physically stored (Delta or LadybugDB).</dd>
+                                <dt>Triple Store</dt><dd>Backend where triples are physically stored (Delta tables in Unity Catalog).</dd>
+                                <dt>Graph DB</dt><dd>Engine that exposes the triples for graph queries and reasoning (currently Lakebase Postgres).</dd>
                                 <dt>Unity Catalog (UC)</dt><dd>Databricks unified governance for catalogs, schemas, tables and volumes.</dd>
                                 <dt>MCP</dt><dd>Model Context Protocol &mdash; exposes the knowledge graph to LLM agents.</dd>
                             </dl>

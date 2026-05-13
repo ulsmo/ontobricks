@@ -158,22 +158,16 @@ async def start_triplestore_sync(
     session_mgr: SessionManager = Depends(get_session_manager),
     settings: Settings = Depends(get_settings),
 ):
-    """Start async dual digital twin build: CREATE VIEW (Triple-Store) then populate LadybugDB graph.
+    """Start async digital twin build: CREATE VIEW then populate the graph store.
 
-    Supports two modes controlled by the ``build_mode`` body parameter:
-
-    * ``"incremental"`` (default) — version-gate check + server-side diff
-      via a Delta snapshot table.  Falls back to full when no snapshot
-      exists or when the diff exceeds a threshold.
-    * ``"full"`` — drop and recreate the graph (legacy behaviour).
+    Always performs a full rebuild. When the graph engine is ``lakebase`` in
+    ``managed_synced`` mode, the Lakeflow pipeline handles the data-plane
+    refresh automatically.
     """
     import threading
     from back.core.task_manager import get_task_manager
 
-    data = await request.json()
-    build_mode = data.get("build_mode", "incremental")
-    force_full = build_mode == "full" or data.get("drop_existing", False)
-    archive_to_registry = bool(data.get("archive_to_registry", True))
+    await request.json()  # consume body (drop_existing / build_mode kept for API compat)
 
     domain = get_domain(session_mgr)
 
@@ -202,12 +196,6 @@ async def start_triplestore_sync(
     if not warehouse_id:
         raise ValidationError("No SQL warehouse configured")
 
-    config_changed = (
-        (domain.last_update or "") > (domain.last_build or "")
-        if domain.last_update
-        else False
-    )
-
     domain.triplestore.pop("stats", None)
     domain.triplestore.pop("_ts_cache_timestamp", None)
     if domain.last_update:
@@ -221,7 +209,6 @@ async def start_triplestore_sync(
     base_uri = domain.ontology.get("base_uri", DEFAULT_BASE_URI)
     mapping_config = domain.assignment
     ontology_config = domain.ontology
-    stored_source_versions = dict(domain.source_versions or {})
     delta_cfg = domain.delta or {}
     domain_snap = DomainSnapshot(domain)
 
@@ -235,28 +222,12 @@ async def start_triplestore_sync(
                 "description": "Preparing mappings and generating queries",
             },
             {
-                "name": "gate",
-                "description": "Checking source tables for new data",
-            },
-            {
                 "name": "view",
                 "description": "Creating the Digital Twin view",
             },
             {
-                "name": "diff",
-                "description": "Detecting what changed since last build",
-            },
-            {
                 "name": "graph",
                 "description": "Updating the knowledge graph",
-            },
-            {
-                "name": "snapshot",
-                "description": "Saving a snapshot for next time",
-            },
-            {
-                "name": "archive",
-                "description": "Backing up the graph to the registry",
             },
         ],
     )
@@ -277,13 +248,8 @@ async def start_triplestore_sync(
             base_uri,
             mapping_config,
             ontology_config,
-            stored_source_versions,
             delta_cfg,
-            force_full,
-            config_changed=config_changed,
-            snapshot_version=getattr(domain, "current_version", "1") or "1",
             build_kind="session",
-            archive_to_registry=archive_to_registry,
         )
 
     thread = threading.Thread(target=run_sync, daemon=True)
@@ -681,144 +647,6 @@ async def cohort_uc_probe_write(
     return {"success": True, **out}
 
 
-# ===========================================
-# Cohort Discovery Agent (Stage 2 — NL → CohortRule)
-# ===========================================
-
-
-@router.post("/cohorts/agent")
-async def cohorts_agent(
-    request: Request,
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """Translate a natural-language prompt into a validated CohortRule.
-
-    Body::
-
-        {
-            "prompt":  "find consultants who can be staffed together",
-            "history": [{"role": "user"|"assistant", "content": "..."}, ...]
-        }
-
-    Response::
-
-        {
-            "success": true,
-            "rule":  { ... validated CohortRule JSON ...} | null,
-            "reply": "...short markdown explanation...",
-            "tools": [{"name": "list_classes", "duration_ms": 12}, ...],
-            "iterations": 4,
-            "usage": {"prompt_tokens": ..., "completion_tokens": ...}
-        }
-
-    The proposed rule is *not* persisted -- the user reviews and saves it
-    via the existing ``POST /cohorts/rules`` route. If the agent could
-    not assemble a valid rule, ``rule`` is ``null`` and ``reply`` carries
-    the (likely clarifying) follow-up question.
-    """
-    import asyncio
-    import os
-
-    from agents.agent_cohort import run_agent as run_cohort_agent
-    from api.routers.internal._helpers import map_route_errors
-    from back.core.helpers import get_databricks_host_and_token
-
-    data = await request.json()
-    prompt = (data.get("prompt") or data.get("message") or "").strip()
-    client_history = data.get("history") or []
-
-    if not prompt:
-        raise ValidationError("No prompt provided")
-
-    domain = get_domain(session_mgr)
-
-    host, token = get_databricks_host_and_token(domain, settings)
-    if not host or not token:
-        raise ValidationError("Databricks credentials not configured")
-
-    llm_endpoint = (domain.info or {}).get("llm_endpoint", "") or ""
-    if not llm_endpoint:
-        llm_endpoint = _auto_discover_llm_endpoint(domain, settings)
-        if llm_endpoint:
-            logger.info(
-                "CohortAgent: auto-selected LLM endpoint '%s' (no domain default)",
-                llm_endpoint,
-            )
-    if not llm_endpoint:
-        raise ValidationError(
-            "No LLM serving endpoint available. Please set one in Domain Settings.",
-        )
-
-    reg = DigitalTwin.resolve_registry(session_mgr, settings)
-    registry_params = {
-        "registry_catalog": reg.get("catalog") or "",
-        "registry_schema": reg.get("schema") or "",
-        "registry_volume": reg.get("volume") or "",
-    }
-
-    app_port = os.environ.get("DATABRICKS_APP_PORT") or os.environ.get("PORT") or "8000"
-    base_url = f"http://localhost:{app_port}"
-
-    session_cookies = dict(request.cookies or {})
-    _FORWARDED_HEADER_PREFIXES = ("x-forwarded-", "x-real-")
-    _FORWARDED_EXTRA_HEADERS = {"x-csrf-token", "referer"}
-    session_headers = {
-        k: v
-        for k, v in request.headers.items()
-        if k.lower().startswith(_FORWARDED_HEADER_PREFIXES)
-        or k.lower() in _FORWARDED_EXTRA_HEADERS
-    }
-
-    domain_name = _chat_resolve_domain_name(domain)
-
-    logger.info(
-        "CohortAgent: prompt=%s, domain=%s, endpoint=%s",
-        prompt[:80],
-        domain_name,
-        llm_endpoint,
-    )
-
-    with map_route_errors("Cohort Discovery agent request failed", logger):
-        agent_result = await asyncio.to_thread(
-            run_cohort_agent,
-            host=host,
-            token=token,
-            endpoint_name=llm_endpoint,
-            base_url=base_url,
-            domain_name=domain_name,
-            registry_params=registry_params,
-            session_cookies=session_cookies,
-            session_headers=session_headers,
-            user_message=prompt,
-            conversation_history=client_history,
-        )
-
-    if not agent_result.success:
-        raise InfrastructureError(
-            "Cohort Discovery agent failed",
-            detail=agent_result.error or None,
-        )
-
-    tool_calls = [
-        {
-            "name": step.tool_name,
-            "duration_ms": step.duration_ms,
-        }
-        for step in agent_result.steps
-        if step.step_type == "tool_result"
-    ]
-
-    return {
-        "success": True,
-        "rule": agent_result.proposed_rule,
-        "reply": agent_result.reply,
-        "tools": tool_calls,
-        "iterations": agent_result.iterations,
-        "usage": agent_result.usage,
-    }
-
-
 @router.post("/sync/filter")
 async def filter_triplestore(
     request: Request,
@@ -1199,64 +1027,6 @@ async def dt_existence(
     dt = DigitalTwin(domain)
     await run_blocking(dt.sync_last_build_from_schedule, settings)
     return await dt.get_or_fetch_dt_existence(settings)
-
-
-@router.post(
-    "/sync/reload-from-registry",
-    dependencies=[Depends(require(ROLE_BUILDER, scope="domain"))],
-)
-async def reload_graph_from_registry(
-    request: Request,
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """Download the LadybugDB archive from the registry volume and extract it locally."""
-    from back.objects.domain import Domain
-
-    domain = get_domain(session_mgr)
-    uc = make_volume_file_service(domain, settings)
-    if not uc.is_configured():
-        raise ValidationError("Databricks credentials are not configured")
-    warning = Domain(domain).sync_ladybug_from_volume(uc)
-    if warning:
-        logger.warning("reload-from-registry failed: %s", warning)
-        raise InfrastructureError(
-            "Failed to reload graph from registry", detail=warning
-        )
-
-    logger.info("reload-from-registry succeeded for domain '%s'", domain.domain_folder)
-    return {"success": True, "message": "Graph reloaded from registry"}
-
-
-@router.post(
-    "/sync/drop-snapshot",
-    dependencies=[Depends(require(ROLE_BUILDER, scope="domain"))],
-)
-async def drop_snapshot(
-    request: Request,
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """Drop the incremental snapshot table to force a full rebuild on next build."""
-    domain = get_domain(session_mgr)
-    snapshot_table = domain.snapshot_table
-    if not snapshot_table:
-        raise ValidationError("No snapshot table is configured")
-
-    host, token, warehouse_id = get_databricks_credentials(domain, settings)
-    if not host or not warehouse_id:
-        raise ValidationError("Databricks is not configured")
-
-    from back.core.triplestore import IncrementalBuildService
-
-    client = DatabricksClient(host=host, token=token, warehouse_id=warehouse_id)
-    incr_svc = IncrementalBuildService(client)
-    incr_svc.drop_snapshot(snapshot_table)
-
-    domain.source_versions = {}
-    domain.save()
-
-    return {"success": True, "message": f"Snapshot {snapshot_table} dropped"}
 
 
 # ===========================================
@@ -1769,7 +1539,7 @@ async def materialize_inferred(
     session_mgr: SessionManager = Depends(get_session_manager),
     settings: Settings = Depends(get_settings),
 ):
-    """Materialise previously inferred triples to Delta and/or LadybugDB."""
+    """Materialise previously inferred triples to Delta and/or the active graph store."""
     from back.core.task_manager import get_task_manager
     from back.core.reasoning import InferredTriple, ReasoningResult, ReasoningService
 
@@ -2247,7 +2017,7 @@ async def dtwin_graphql_execute(
     """Execute a GraphQL query against the CURRENT session's domain.
 
     Session-aware counterpart of ``POST /graphql/{domain}`` used by the
-    Graph Chat agent.  Requires a configured graph backend (LadybugDB)
+    Graph Chat agent.  Requires a configured graph backend
     to resolve the query.
     """
     from back.core.graphql import build_schema_for_domain, DEFAULT_DEPTH, MAX_DEPTH
@@ -2282,7 +2052,7 @@ async def dtwin_graphql_execute(
     store = get_triplestore(domain, settings, backend="graph")
     if not store:
         raise InfrastructureError(
-            "Graph backend (LadybugDB) not configured or unreachable."
+            "Graph backend not configured or unreachable."
         )
 
     context = {

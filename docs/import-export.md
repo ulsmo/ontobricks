@@ -33,7 +33,6 @@ domains/<folder>/V2/V2.json
 | `V{n}/documents/**` | Yes | User-uploaded files attached to the version |
 | `.domain_permissions.json` | Optional (`--include-permissions`) | Role assignments for the domain |
 | `manifest.json` | Yes | Schema version, source env, per-domain/version inventory |
-| `*.lbug.tar.gz` | **Never** | Rebuilt in the target by Digital Twin sync |
 | `.schedule_history.json` | **Never** | Per-env scheduling history, not portable |
 | `.registry` marker, `.global_config.json`, cached files | **Never** | Env-specific |
 
@@ -246,17 +245,16 @@ ONTOBRICKS_PROFILE=dst scripts/registry_transfer.sh import-commit \
   --yes
 
 # 6. On the target env, rebuild the Digital Twin for each imported domain
-#    so the .lbug.tar.gz snapshots (which are NOT transferred) get regenerated.
+#    so the Delta view + Lakebase Graph DB tables (which are NOT transferred)
+#    get regenerated.
 ```
 
 ## Things to watch out for
 
-- **LadybugDB snapshots are not transferred.** The embedded graph archive
-  (`*.lbug.tar.gz`) is environment-specific. After an import, open each
-  affected domain and re-run **Digital Twin → Synchronize** to rebuild it.
-- **The triple-store Delta view is not transferred either.** It is
-  re-created on the next synchronize in the target env, using the target's
-  SQL Warehouse.
+- **Triple-store materializations are not transferred.** Neither the Delta
+  view nor the Lakebase Postgres flat table is part of the archive — they
+  are re-created on the next synchronize in the target env, using the
+  target's SQL Warehouse and Lakebase instance.
 - **The archive carries no secrets.** Databricks host, PAT, and query
   results are never serialized. Authentication for both sides is handled
   via your Databricks CLI profiles.

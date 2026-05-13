@@ -1,12 +1,8 @@
-"""Tests for the SWRL SQL/Cypher translators and SWRLEngine."""
-
-import pytest
+"""Tests for the SWRL SQL translator and SWRLEngine."""
 
 from back.core.reasoning.models import InferredTriple, ReasoningResult
 from back.core.reasoning.SWRLSQLTranslator import SWRLSQLTranslator
 from back.core.reasoning.SWRLParser import SWRLParser
-from back.core.reasoning.SWRLCypherTranslator import SWRLCypherTranslator
-from back.core.reasoning.SWRLFlatCypherTranslator import SWRLFlatCypherTranslator
 
 
 # -- Atom parser tests ----------------------------------------------------
@@ -97,7 +93,7 @@ class TestSWRLSQLTranslator:
 
     def test_no_property_atoms_generates_sql(self):
         """Class-only antecedent (e.g. Customer(?x)) with consequent
-        hasContract(?x,?z) now generates a NOT EXISTS violation query."""
+        hasContract(?x,?z) generates a NOT EXISTS violation query."""
         params = {
             "antecedent": "Customer(?x)",
             "consequent": "hasContract(?x, ?z)",
@@ -118,53 +114,6 @@ class TestSWRLSQLTranslator:
         sql = self.translator.build_materialization_sql("triples", params)
         assert sql is not None
         assert "INSERT INTO triples" in sql
-
-
-# -- Cypher Translator tests -----------------------------------------------
-
-
-class TestSWRLCypherTranslator:
-    def setup_method(self):
-        self.translator = SWRLCypherTranslator(graph_schema=None)
-
-    def test_simple_rule_violation(self):
-        params = {
-            "antecedent": "Customer(?x) \u2227 hasClaim(?x, ?y) \u2227 Claim(?y)",
-            "consequent": "hasContract(?x, ?z)",
-            "base_uri": "http://ex.org",
-            "uri_map": {},
-        }
-        query = self.translator.build_violation_query(params)
-        assert query is not None
-        assert "MATCH" in query
-        assert "NOT EXISTS" in query
-        assert "RETURN DISTINCT" in query
-
-    def test_missing_atoms_returns_none(self):
-        params = {"antecedent": "", "consequent": "Foo(?x)", "base_uri": ""}
-        assert self.translator.build_violation_query(params) is None
-
-    def test_materialization_query(self):
-        params = {
-            "antecedent": "Customer(?x) \u2227 hasClaim(?x, ?y) \u2227 Claim(?y)",
-            "consequent": "hasContract(?x, ?y)",
-            "base_uri": "http://ex.org",
-            "uri_map": {},
-        }
-        query = self.translator.build_materialization_query(params)
-        assert query is not None
-        assert "CREATE" in query
-
-    def test_materialization_rejects_unbound_variable(self):
-        """Consequent variable ?z not in antecedent → returns None (no cartesian product)."""
-        params = {
-            "antecedent": "Customer(?x) \u2227 hasClaim(?x, ?y) \u2227 Claim(?y)",
-            "consequent": "hasContract(?x, ?z)",
-            "base_uri": "http://ex.org",
-            "uri_map": {},
-        }
-        query = self.translator.build_materialization_query(params)
-        assert query is None
 
 
 # -- SWRLEngine tests ------------------------------------------------------
@@ -268,55 +217,3 @@ class TestReasoningResultDeduplication:
         removed = r1.deduplicate()
         assert removed == 1
         assert len(r1.inferred_triples) == 3
-
-
-# -- Flat Cypher Translator inference NOT EXISTS tests ---------------------
-
-
-class TestSWRLFlatCypherTranslatorInference:
-    def setup_method(self):
-        self.translator = SWRLFlatCypherTranslator(node_table="Triple")
-
-    def test_inference_query_contains_not_exists(self):
-        params = {
-            "antecedent": "Customer(?x) \u2227 hasClaim(?x, ?y) \u2227 Claim(?y)",
-            "consequent": "hasContract(?x, ?y)",
-            "base_uri": "http://ex.org",
-            "uri_map": {},
-        }
-        query = self.translator.build_inference_query(params)
-        assert query is not None
-        assert "NOT EXISTS" in query
-        assert "RETURN DISTINCT" in query
-
-    def test_inference_class_consequent_not_exists(self):
-        params = {
-            "antecedent": "Person(?x) \u2227 hasAge(?x, ?a)",
-            "consequent": "Adult(?x)",
-            "base_uri": "http://ex.org",
-            "uri_map": {},
-        }
-        query = self.translator.build_inference_query(params)
-        assert query is not None
-        assert "NOT EXISTS" in query
-        assert "rdf:type" in query or "22-rdf-syntax-ns#type" in query
-
-
-# -- Graph Cypher Translator inference NOT EXISTS tests --------------------
-
-
-class TestSWRLCypherTranslatorInference:
-    def setup_method(self):
-        self.translator = SWRLCypherTranslator(graph_schema=None)
-
-    def test_inference_query_contains_not_exists(self):
-        params = {
-            "antecedent": "Customer(?x) \u2227 hasClaim(?x, ?y) \u2227 Claim(?y)",
-            "consequent": "hasContract(?x, ?y)",
-            "base_uri": "http://ex.org",
-            "uri_map": {},
-        }
-        query = self.translator.build_inference_query(params)
-        assert query is not None
-        assert "NOT EXISTS" in query
-        assert "RETURN DISTINCT" in query

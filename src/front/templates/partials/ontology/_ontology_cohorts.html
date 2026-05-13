@@ -1,7 +1,7 @@
 <!--
     Cohort Discovery — DESIGN page (Ontology > Advanced > Cohorts).
 
-    Lets the SA design rules: NL prompt → review → tweak → save.
+    Lets the SA design rules via the Build form (steps 1–5) → save.
     Execution and results live in the Digital Twin's Cohorts section.
 -->
 <div class="content-section">
@@ -51,75 +51,14 @@
             </div>
         </aside>
 
-        <!-- Main column: tabs (Describe | Build rule) -->
+        <!-- Main column: Build rule form -->
         <section class="cohort-tabs-wrap card">
             <div class="card-body p-0">
-                <ul class="nav nav-tabs ob-tabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="cohortTabDescribeBtn"
-                                data-bs-toggle="tab" data-bs-target="#cohortTabDescribe"
-                                type="button" role="tab" aria-controls="cohortTabDescribe"
-                                aria-selected="true">
-                            <i class="bi bi-stars me-1"></i>Describe
-                            <span class="text-muted small ms-1">(prompt)</span>
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="cohortTabBuildBtn"
-                                data-bs-toggle="tab" data-bs-target="#cohortTabBuild"
-                                type="button" role="tab" aria-controls="cohortTabBuild"
-                                aria-selected="false">
-                            <i class="bi bi-sliders me-1"></i>Build rule
-                            <span class="text-muted small ms-1">(steps 1–5)</span>
-                        </button>
-                    </li>
-                </ul>
-
                 <div class="tab-content cohort-tab-content p-3">
 
-                    <!-- Tab 1 — Describe (NL agent) -->
-                    <div class="tab-pane fade show active" id="cohortTabDescribe"
-                         role="tabpanel" aria-labelledby="cohortTabDescribeBtn">
-                        <div class="cohort-agent-banner card" id="cohortAgentBanner">
-                            <div class="card-body py-3 px-3">
-                                <label class="form-label small fw-semibold mb-2">
-                                    <i class="bi bi-stars text-primary me-1"></i>
-                                    Describe the cohort you want
-                                </label>
-                                <div class="d-flex align-items-center gap-2 flex-wrap">
-                                    <input type="text" class="form-control form-control-sm flex-grow-1"
-                                           id="cohortAgentPrompt"
-                                           placeholder='e.g. "find consultants who can be staffed together on a project — exempts only with exempts"'
-                                           onkeydown="if(event.key==='Enter'){CohortModule.runAgent();}">
-                                    <button class="btn btn-sm btn-primary" id="cohortAgentRunBtn"
-                                            onclick="CohortModule.runAgent()">
-                                        <i class="bi bi-magic me-1"></i>Generate rule
-                                    </button>
-                                    <button class="btn btn-sm btn-link p-0 ms-1" type="button"
-                                            data-bs-toggle="collapse" data-bs-target="#cohortAgentTrace"
-                                            aria-expanded="false" aria-controls="cohortAgentTrace"
-                                            title="Show agent trace">
-                                        <i class="bi bi-list-task"></i>
-                                    </button>
-                                </div>
-                                <div class="form-text small mt-1">
-                                    The agent inspects your ontology and graph, then proposes
-                                    a rule. Switch to <strong>Build rule</strong> to review
-                                    and tweak before saving.
-                                </div>
-                                <div id="cohortAgentReply" class="small mt-2 d-none"></div>
-                                <div class="collapse mt-2" id="cohortAgentTrace">
-                                    <div class="cohort-agent-trace small text-muted" id="cohortAgentTraceBody">
-                                        No agent run yet.
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tab 2 — Build rule (form) -->
-                    <div class="tab-pane fade" id="cohortTabBuild"
-                         role="tabpanel" aria-labelledby="cohortTabBuildBtn">
+                    <!-- Build rule (form) -->
+                    <div class="tab-pane fade show active" id="cohortTabBuild"
+                         role="tabpanel">
 
                         <!-- Section 1 — Identity -->
                         <div class="cohort-section mb-4">
@@ -310,7 +249,7 @@
                             </div>
                         </div>
 
-                    </div><!-- /tab-pane Build -->
+                    </div><!-- /tab-pane -->
                 </div><!-- /tab-content -->
             </div><!-- /card-body -->
         </section>

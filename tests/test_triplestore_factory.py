@@ -19,7 +19,6 @@ def _mock_domain(host="https://h", token="tok", warehouse_id="wh"):
     domain.triplestore = {}
     domain.databricks = {"host": host, "token": token, "warehouse_id": warehouse_id}
     domain.info = {"name": "TestDomain"}
-    domain.ladybug = {"db_path": "/tmp/ontobricks"}
     return domain
 
 
@@ -35,7 +34,7 @@ class TestGetTriplestore:
         with (
             patch("back.core.graphdb.get_graphdb") as mock_gdb,
             patch.object(
-                TripleStoreFactory, "_resolve_graph_engine", return_value="ladybug"
+                TripleStoreFactory, "_resolve_graph_engine", return_value="lakebase"
             ),
             patch.object(
                 TripleStoreFactory, "_resolve_graph_engine_config", return_value={}
@@ -44,8 +43,61 @@ class TestGetTriplestore:
             mock_gdb.return_value = MagicMock()
             result = get_triplestore(domain)
             mock_gdb.assert_called_once_with(
-                domain, None, engine="ladybug", engine_config={}
+                domain, None, engine="lakebase", engine_config={}
             )
+
+    def test_graph_backend_lakebase_engine(self):
+        domain = _mock_domain()
+        with (
+            patch("back.core.graphdb.get_graphdb") as mock_gdb,
+            patch.object(
+                TripleStoreFactory, "_resolve_graph_engine", return_value="lakebase"
+            ),
+            patch.object(
+                TripleStoreFactory,
+                "_resolve_graph_engine_config",
+                return_value={"database": "db1", "schema": "g"},
+            ),
+        ):
+            mock_gdb.return_value = MagicMock()
+            result = get_triplestore(domain)
+            mock_gdb.assert_called_once_with(
+                domain,
+                None,
+                engine="lakebase",
+                engine_config={"database": "db1", "schema": "g"},
+            )
+            assert result is not None
+
+    def test_registry_mirror_engine_overrides_global(self):
+        """POST /dtwin/sync/filter must honour the registry mirror over global config."""
+        domain = _mock_domain()
+        domain.settings = {
+            "registry": {
+                "graph_engine": "lakebase",
+                "graph_engine_config": {"schema": "custom_graph"},
+            }
+        }
+        with (
+            patch("back.core.graphdb.get_graphdb") as mock_gdb,
+            patch.object(
+                TripleStoreFactory,
+                "_read_global_config",
+                side_effect=[
+                    "lakebase",
+                    {},
+                ],
+            ),
+        ):
+            mock_gdb.return_value = MagicMock()
+            result = get_triplestore(domain)
+            mock_gdb.assert_called_once_with(
+                domain,
+                None,
+                engine="lakebase",
+                engine_config={"schema": "custom_graph"},
+            )
+            assert result is not None
 
     @patch.object(
         _triple_store_factory_mod,

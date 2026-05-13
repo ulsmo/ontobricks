@@ -37,7 +37,6 @@ def _mock_domain(
     }
     domain.snapshot_table = f"cat.sch._ob_snapshot_{safe}_v1"
     domain.design_layout = {"views": {}, "map": {}}
-    domain.ladybug = {}
     domain.save = MagicMock()
     domain.get_classes.return_value = classes or []
     domain.get_properties.return_value = properties or []

@@ -36,7 +36,8 @@ Key Design Decisions
 - **Class-first policy** -- behaviour is encapsulated in service classes, not
   loose module-level functions.
 - **Strategy pattern** for triple stores -- ``TripleStoreFactory`` instantiates
-  the correct backend (Delta or LadybugDB).
+  the Delta view client and ``GraphDBFactory`` instantiates the active Graph DB
+  engine (Lakebase Postgres today).
 - **Facade pattern** for Databricks APIs -- ``DatabricksClient`` composes
   per-surface service classes.
 - **W3C standards** -- OWL, RDFS, R2RML, SPARQL, and SHACL each have their
@@ -53,7 +54,8 @@ Package                                     Responsibility
 ``back.fastapi``                            GraphQL routes and domain HTTP helpers
 ``api``                                     External REST v1 + Digital Twin (mounted at ``/api``)
 ``back.core.databricks``                    Typed facades for Databricks SDK & SQL
-``back.core.triplestore``                   Abstract base + Delta / LadybugDB backends
+``back.core.triplestore``                   Abstract base + Delta view backend
+``back.core.graphdb``                       Pluggable Graph DB engines (Lakebase Postgres, …)
 ``back.core.w3c``                           OWL, RDFS, R2RML, SPARQL, SHACL services
 ``back.core.reasoning``                     OWL 2 RL inference + SWRL engine
 ``back.core.graphql``                       Strawberry GraphQL schema from ontology

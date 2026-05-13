@@ -26,46 +26,19 @@ Factory
    :undoc-members:
    :show-inheritance:
 
-LadybugDB subpackage
---------------------
+Lakebase (Postgres) subpackage
+------------------------------
 
-.. automodule:: back.core.graphdb.ladybugdb
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :exclude-members: LadybugBase, LadybugFlatStore, LadybugGraphStore, GraphSchema, GraphSchemaBuilder, GraphSyncService, NodeTableDef, RelTableDef
+See :doc:`app.core.graphdb.lakebase` for ``back.core.graphdb.lakebase`` (flat triple
+tables on the App-bound Lakebase Postgres instance).
 
-.. automodule:: back.core.graphdb.ladybugdb.LadybugBase
-   :members:
-   :undoc-members:
-   :show-inheritance:
+Adding a new engine
+-------------------
 
-.. automodule:: back.core.graphdb.ladybugdb.LadybugFlatStore
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: back.core.graphdb.ladybugdb.LadybugGraphStore
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: back.core.graphdb.ladybugdb.GraphSchema
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: back.core.graphdb.ladybugdb.GraphSchemaBuilder
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: back.core.graphdb.ladybugdb.GraphSyncService
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: back.core.graphdb.ladybugdb.models
-   :members:
-   :undoc-members:
-   :show-inheritance:
+A copy-paste template for new engines lives at
+``src/back/core/graphdb/_starter_kit/ExampleStore.py``. Implement the
+:class:`back.core.graphdb.GraphDBBackend` contract, register the engine in
+:class:`back.core.graphdb.GraphDBFactory`, and add it to
+``ALLOWED_GRAPH_ENGINES`` in
+:mod:`back.objects.session.global_config`. See ``docs/graphdb-integration.md``
+for the full integration walkthrough.

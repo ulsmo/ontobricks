@@ -67,29 +67,6 @@
         </div>
     </div>
 
-    <!-- Build Mode Options -->
-    <div class="d-flex align-items-center gap-3 mb-2 small">
-        <span class="fw-semibold text-muted"><i class="bi bi-sliders me-1"></i>Build Mode</span>
-        <div class="form-check mb-0">
-            <input class="form-check-input" type="radio" name="buildMode" id="buildModeIncremental" value="incremental" checked
-                   {% if _dr not in ('builder', 'admin', '') %}disabled{% endif %}>
-            <label class="form-check-label" for="buildModeIncremental">Incremental</label>
-        </div>
-        <div class="form-check mb-0">
-            <input class="form-check-input" type="radio" name="buildMode" id="buildModeFull" value="full"
-                   {% if _dr not in ('builder', 'admin', '') %}disabled{% endif %}>
-            <label class="form-check-label" for="buildModeFull">Full rebuild</label>
-        </div>
-    </div>
-    <div class="d-flex align-items-start gap-2 mb-2 small">
-        <div class="form-check mb-0">
-            <input class="form-check-input" type="checkbox" id="syncArchiveToRegistry" checked
-                   {% if _dr not in ('builder', 'admin', '') %}disabled{% endif %}>
-            <label class="form-check-label" for="syncArchiveToRegistry">Archive graph to registry</label>
-        </div>
-        <span class="text-muted" style="max-width: 28rem;">After the graph is updated locally, copy it to your registry Volume for reload on other machines. Uncheck for a faster build when you do not need that backup.</span>
-    </div>
-
     <!-- Progress -->
     <div id="syncProgressArea" class="mt-2 mb-2 d-none">
             <div class="progress mb-2 ob-progress-md">
@@ -116,48 +93,14 @@
                         <i class="bi bi-diagram-2 me-1"></i>Mapping
                     </span>
                 </div>
-                <div id="syncReadinessLoading" class="text-center py-3 d-none"></div>
                 <div id="syncReadinessContent" class="d-none">
-                    <div class="row g-2 mb-2">
-                        <div class="col">
-                            <div class="ob-kpi-tile" id="syncTileEntities">
-                                <div class="ob-kpi-tile-icon"><i class="bi bi-box"></i></div>
-                                <div class="ob-kpi-tile-value" id="syncTileEntitiesValue">-</div>
-                                <div class="ob-kpi-tile-label">Entities</div>
-                            </div>
-                        </div>
-                        <div class="col">
-                            <div class="ob-kpi-tile" id="syncTileAttributes">
-                                <div class="ob-kpi-tile-icon"><i class="bi bi-list-ul"></i></div>
-                                <div class="ob-kpi-tile-value" id="syncTileAttributesValue">-</div>
-                                <div class="ob-kpi-tile-label">Attributes</div>
-                            </div>
-                        </div>
-                        <div class="col">
-                            <div class="ob-kpi-tile" id="syncTileRelationships">
-                                <div class="ob-kpi-tile-icon"><i class="bi bi-arrow-left-right"></i></div>
-                                <div class="ob-kpi-tile-value" id="syncTileRelationshipsValue">-</div>
-                                <div class="ob-kpi-tile-label">Relationships</div>
-                            </div>
-                        </div>
-                        <div class="col">
-                            <div class="ob-kpi-tile" id="syncTileMappedEntities">
-                                <div class="ob-kpi-tile-icon"><i class="bi bi-link-45deg"></i></div>
-                                <div class="ob-kpi-tile-value" id="syncTileMappedEntitiesValue">-</div>
-                                <div class="ob-kpi-tile-label">Mapped Entities</div>
-                            </div>
-                        </div>
-                        <div class="col">
-                            <div class="ob-kpi-tile" id="syncTileMappedRels">
-                                <div class="ob-kpi-tile-icon"><i class="bi bi-diagram-2"></i></div>
-                                <div class="ob-kpi-tile-value" id="syncTileMappedRelsValue">-</div>
-                                <div class="ob-kpi-tile-label">Mapped Rel.</div>
-                            </div>
-                        </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="text-muted small"><i class="bi bi-diagram-2 me-1"></i>Mapping</span>
+                        <span id="syncMappingReadyBadge"></span>
                     </div>
                     <div class="alert alert-warning small mb-0 mt-2 d-none" id="syncNotReadyAlert">
                         <i class="bi bi-exclamation-triangle me-1"></i>
-                        <span id="syncNotReadyMessage">Both Ontology and Assignments must be ready before you can build or load data.</span>
+                        Mapping must be ready before you can build.
                     </div>
                 </div>
             </div>
@@ -202,27 +145,6 @@
                                         <div class="text-muted mb-1">Unity Catalog VIEW</div>
                                         <code id="dtViewName" class="d-block text-break">N/A</code>
                                     </div>
-                                    <div class="small mt-2 d-none" id="dtSnapshotArea">
-                                        <div class="text-muted mb-1">Incremental Snapshot</div>
-                                        <div class="d-flex justify-content-between align-items-center">
-                                            <code id="dtSnapshotName" class="text-break ob-code-tiny"></code>
-                                            <span class="d-flex align-items-center gap-1">
-                                                <span id="dtExistSnapshot"></span>
-                                                {% if _dr in ('builder', 'admin', '') %}
-                                                <button type="button" id="dtDropSnapshot" class="btn btn-outline-danger btn-sm py-0 px-1 ob-btn-compact d-none"
-                                                        data-sync-action="drop-snapshot-table"
-                                                        title="Drop snapshot to force a full rebuild on next build">
-                                                    <i class="bi bi-trash me-1"></i>Drop
-                                                </button>
-                                                {% else %}
-                                                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ob-btn-compact d-none" disabled
-                                                        title="Only builders and admins can drop the snapshot">
-                                                    <i class="bi bi-lock me-1"></i>Drop
-                                                </button>
-                                                {% endif %}
-                                            </span>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                             <!-- Graph DB Digital Twin -->
@@ -230,15 +152,16 @@
                                 <div class="border rounded p-3 h-100" id="dtGraphCard">
                                     <div class="d-flex align-items-center mb-2">
                                         <i class="bi bi-diagram-3-fill fs-5 me-2 text-primary"></i>
-                                        <strong>Graph DB Digital Twin</strong>
+                                        <strong id="dtGraphBackendTitle">Graph DB Digital Twin</strong>
                                         <span id="dtExistLocal" class="ms-auto"></span>
                                     </div>
                                     <div class="small">
-                                        <div class="text-muted mb-1">Local graph database</div>
-                                        <div class="mb-1">
-                                            <code id="dtLocalPath" class="d-block text-break text-muted ob-code-tiny"></code>
+                                        <div class="text-muted mb-1" id="dtGraphStorageSubtitle">Local graph database</div>
+                                        <div class="mb-1" id="dtGraphPrimaryRow">
+                                            <code id="dtLocalPath" class="d-block text-break ob-code-tiny"></code>
                                         </div>
-                                        <div class="d-flex justify-content-between align-items-center">
+                                        <!-- Registry archive row (kept hidden; reserved for future archive-capable engines) -->
+                                        <div class="d-flex justify-content-between align-items-center d-none" id="dtRegistryArchiveRow">
                                             <span class="text-muted">Registry archive</span>
                                             <span class="d-flex align-items-center gap-1">
                                                 <span id="dtExistRegistry"></span>
@@ -254,19 +177,38 @@
                                                 {% endif %}
                                             </span>
                                         </div>
+                                        <!-- Lakebase: connection + UC details -->
+                                        <div id="dtLakebaseDetails" class="d-none">
+                                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                                <span class="text-muted">Database</span>
+                                                <code id="dtLakebaseDatabase" class="text-break ob-code-tiny text-muted"></code>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                                <span class="text-muted">Schema</span>
+                                                <code id="dtLakebaseSchema" class="text-break ob-code-tiny text-muted"></code>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                                <span class="text-muted">Table</span>
+                                                <code id="dtLakebaseTable" class="text-break ob-code-tiny text-muted"></code>
+                                                <span id="dtLakebaseTableExists" class="ms-1"></span>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center d-none" id="dtLakebaseSyncedUcRow">
+                                                <span class="text-muted">UC sync object</span>
+                                                <code id="dtLakebaseSyncedUc" class="text-break ob-code-tiny text-muted"></code>
+                                                <span id="dtLakebaseSyncedUcExists" class="ms-1"></span>
+                                            </div>
+                                            <div class="mt-2 small text-muted" id="dtLakebaseBuildNote" style="display:none;">
+                                                <i class="bi bi-info-circle me-1"></i>
+                                                Build writes graph triples to Lakebase
+                                                (<code id="fnLkDatabase2">…</code>.<code id="fnLkSchema2">…</code>.<code id="fnLkTable2">…</code>)<span id="fnLkSyncNote" class="d-none"> and registers a Lakeflow synced table as <code id="fnLkSyncedUc2"></code></span>.
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div id="ladybugSyncInfo" class="mt-2 d-none">
-                        <small class="text-muted">
-                            <i class="bi bi-info-circle me-1"></i>
-                            Building creates a Triple-Store VIEW in Unity Catalog and populates the Graph DB.
-                            The graph is synced to / from the registry volume on domain save / load.
-                        </small>
-                    </div>
                 </div>
             </div>
 

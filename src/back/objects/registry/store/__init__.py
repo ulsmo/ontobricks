@@ -5,26 +5,26 @@ services (:mod:`back.objects.registry.RegistryService`,
 :mod:`back.objects.registry.PermissionService`,
 :mod:`back.objects.registry.scheduler`,
 :mod:`back.objects.session.GlobalConfigService`) and the underlying
-storage backend.
+Lakebase Postgres storage.
 
-Two backends are supported, each in its own subpackage:
+A single concrete backend is supported:
 
-- :mod:`back.objects.registry.store.volume` — JSON files on a Unity
-  Catalog Volume (the original layout; remains the default).
-- :mod:`back.objects.registry.store.lakebase` — PostgreSQL tables on
-  Databricks Lakebase. Requires the optional ``lakebase`` extra
-  (psycopg3 + psycopg-pool) and is loaded lazily only when selected.
+- :mod:`back.objects.registry.store.lakebase` — Postgres tables on
+  Databricks Lakebase. Requires the ``lakebase`` extra (psycopg3 +
+  psycopg-pool) and is imported lazily so that import failures surface
+  only when a store is actually instantiated.
 
 Always go through :class:`RegistryFactory` to obtain a concrete store
-— call sites must not import the ``volume`` / ``lakebase``
-subpackages directly. This keeps the lazy-import discipline that
-keeps volume-only deployments free of the optional Lakebase
-dependencies.
+— call sites must not import the ``lakebase`` subpackage directly.
 
 Binary artifacts (``documents/`` and ``*.lbug.tar.gz``) always live on
 the Unity Catalog Volume and are managed by
 :class:`back.core.databricks.VolumeFileService` — the store handles
 JSON-shaped data only.
+
+The historical JSON-on-Volume backend (``VolumeRegistryStore``) was
+removed in v0.4.0. Operators with on-Volume registry data must run
+``scripts/migrate-registry-to-lakebase.sh`` once before upgrading.
 """
 
 from __future__ import annotations
@@ -35,36 +35,26 @@ from .base import (
     ScheduleHistoryEntry,
     StoreError,
 )
-from .factory import RegistryFactory, build_store
-from .migration import (
-    MigrationReport,
-    migrate_volume_to_lakebase,
-    summarize as summarize_migration,
-)
-from .volume import VolumeRegistryStore
+from .factory import RegistryFactory
 
 __all__ = [
     "DomainSummary",
     "LakebaseRegistryStore",
-    "MigrationReport",
     "RegistryFactory",
     "RegistryStore",
     "ScheduleHistoryEntry",
     "StoreError",
-    "VolumeRegistryStore",
-    "build_store",
-    "migrate_volume_to_lakebase",
-    "summarize_migration",
 ]
 
 
 def __getattr__(name: str):
     """Lazy-import :class:`LakebaseRegistryStore`.
 
-    Pulling :mod:`psycopg` at package-load time would defeat the
-    purpose of making Lakebase an optional extra. Importing the class
-    via attribute access (``store.LakebaseRegistryStore``) defers the
-    import until it is actually needed.
+    Pulling :mod:`psycopg` at package-load time would force callers
+    that never touch the store (e.g. read-only path builders) to
+    install the optional extra. Importing the class via attribute
+    access (``store.LakebaseRegistryStore``) defers the import until
+    it is actually needed.
     """
     if name == "LakebaseRegistryStore":
         from .lakebase import LakebaseRegistryStore as _LakebaseRegistryStore

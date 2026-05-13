@@ -106,9 +106,6 @@ class TestSettingsRoutes:
         response = client.get("/settings/get-base-uri")
         assert response.status_code == 200
 
-    def test_get_cloud_fetch_setting(self, client):
-        response = client.get("/settings/get-cloud-fetch")
-        assert response.status_code == 200
 
 
 class TestOntologyRoutes:

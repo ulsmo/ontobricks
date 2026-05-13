@@ -1,10 +1,15 @@
-"""Decision table engine — compile tabular business rules to SQL / Cypher."""
+"""Decision table engine — compile tabular business rules to SQL.
+
+All currently supported triple stores (Delta views, Lakebase Postgres) are
+SQL-based, so the engine emits a SELECT against the flat triple table.  A
+future Cypher / Gremlin backend would extend this engine via a translator
+seam similar to :class:`back.core.reasoning.SWRLEngine`.
+"""
 
 import time
 from typing import Dict
 
 from back.core.logging import get_logger
-from back.core.graphdb.GraphDBBackend import GraphDBBackend
 from back.core.w3c.rdf_utils import uri_local_name
 from back.core.reasoning.models import InferredTriple, ReasoningResult, RuleViolation
 from back.core.reasoning.constants import (
@@ -12,14 +17,13 @@ from back.core.reasoning.constants import (
     DT_STRING_OPS,
     DT_NUMERIC_OPS,
     DT_OP_SQL,
-    DT_OP_CYPHER,
 )
 
 logger = get_logger(__name__)
 
 
 class DecisionTableEngine:
-    """Decision table engine — compile tabular business rules to SQL / Cypher.
+    """Decision table engine — compile tabular business rules to SQL.
 
     A decision table has:
 
@@ -100,7 +104,6 @@ class DecisionTableEngine:
         t0 = time.time()
         result = ReasoningResult()
         base_uri = ontology.get("base_uri", "")
-        is_cypher = GraphDBBackend.is_cypher_backend(store)
         uri_map = self._build_uri_map(ontology)
         for dt in tables:
             if not dt.get("enabled", True):
@@ -108,7 +111,7 @@ class DecisionTableEngine:
             try:
                 resolved = self._resolve_dt(dt, uri_map, base_uri)
                 dt_result = self._execute_one(
-                    resolved, store, table_name, base_uri, is_cypher, materialize
+                    resolved, store, table_name, base_uri, materialize
                 )
                 result.merge(dt_result)
             except Exception as e:
@@ -131,7 +134,7 @@ class DecisionTableEngine:
         }
         return result
 
-    def _execute_one(self, dt, store, table_name, base_uri, is_cypher, materialize):
+    def _execute_one(self, dt, store, table_name, base_uri, materialize):
         result = ReasoningResult()
         dt_name = dt.get("name", "unnamed")
         rows = dt.get("rows", [])
@@ -157,7 +160,6 @@ class DecisionTableEngine:
                 store,
                 table_name,
                 base_uri,
-                is_cypher,
                 result,
                 dt_name,
                 output_prop_uri,
@@ -171,7 +173,6 @@ class DecisionTableEngine:
                 store,
                 table_name,
                 base_uri,
-                is_cypher,
                 result,
                 dt_name,
                 output_prop_uri,
@@ -188,7 +189,6 @@ class DecisionTableEngine:
         store,
         table_name,
         base_uri,
-        is_cypher,
         result,
         dt_name,
         output_prop_uri,
@@ -196,10 +196,8 @@ class DecisionTableEngine:
         rows,
         output_default_val="",
     ):
-        if is_cypher:
-            query = self.build_violation_cypher(dt, table_name, base_uri, store)
-        else:
-            query = self.build_violation_sql(dt, table_name, base_uri)
+        tbl_ref = store.sql_table_reference(table_name)
+        query = self.build_violation_sql(dt, tbl_ref, base_uri)
         if not query:
             logger.warning("Decision table '%s': query builder returned None", dt_name)
             return
@@ -210,7 +208,7 @@ class DecisionTableEngine:
                 if r.get("action_value"):
                     action_val = r["action_value"]
                     break
-        for subj in self._run_query(store, query, is_cypher, dt_name):
+        for subj in self._run_query(store, query, dt_name):
             msg = f"Matches decision table '{dt_name}'"
             if action_val and output_prop_name:
                 msg += f" → {output_prop_name} = {action_val}"
@@ -240,7 +238,6 @@ class DecisionTableEngine:
         store,
         table_name,
         base_uri,
-        is_cypher,
         result,
         dt_name,
         output_prop_uri,
@@ -255,18 +252,14 @@ class DecisionTableEngine:
             single_dt = dict(dt)
             single_dt["rows"] = [row]
             single_dt["row_logic"] = "or"
-            if is_cypher:
-                query = self.build_violation_cypher(
-                    single_dt, table_name, base_uri, store
-                )
-            else:
-                query = self.build_violation_sql(single_dt, table_name, base_uri)
+            tbl_ref = store.sql_table_reference(table_name)
+            query = self.build_violation_sql(single_dt, tbl_ref, base_uri)
             if not query:
                 continue
             logger.debug(
                 "Decision table '%s' row %d query:\n%s", dt_name, ri + 1, query
             )
-            for subj in self._run_query(store, query, is_cypher, dt_name):
+            for subj in self._run_query(store, query, dt_name):
                 if hit_policy == "first" and subj in seen:
                     continue
                 seen.add(subj)
@@ -294,21 +287,14 @@ class DecisionTableEngine:
                     )
 
     @staticmethod
-    def _run_query(store, query, is_cypher, dt_name):
+    def _run_query(store, query, dt_name):
         subjects = []
         try:
-            if is_cypher:
-                conn = store.get_connection()
-                raw = conn.execute(query)
-                for row in raw:
-                    if row:
-                        subjects.append(row[0])
-            else:
-                raw = store.execute_query(query)
-                for row in raw:
-                    s = row.get("s", "")
-                    if s:
-                        subjects.append(s)
+            raw = store.execute_query(query)
+            for row in raw:
+                s = row.get("s", "")
+                if s:
+                    subjects.append(s)
         except Exception as e:
             logger.error("Decision table query failed for '%s': %s", dt_name, e)
         return subjects
@@ -373,69 +359,6 @@ class DecisionTableEngine:
             f"  AND ({row_joiner.join(row_conditions)})"
         )
         return sql
-
-    def build_violation_cypher(self, dt, table_name, base_uri, store):
-        target_cls_uri = dt.get("target_class_uri", "")
-        inputs = dt.get("input_columns", [])
-        rows = dt.get("rows", [])
-        if not target_cls_uri or not inputs or not rows:
-            return None
-        tbl = store.get_node_table(table_name)
-        match_parts = [f"MATCH (t0:{tbl})"]
-        where_parts = [
-            f"t0.predicate = '{RDF_TYPE}'",
-            f"t0.object = '{target_cls_uri}'",
-        ]
-        valid_inputs = []
-        for i, inp in enumerate(inputs):
-            alias = f"inp{i}"
-            prop_uri = inp.get("property_uri", "")
-            if not prop_uri:
-                continue
-            match_parts.append(f"MATCH ({alias}:{tbl})")
-            where_parts.append(f"{alias}.subject = t0.subject")
-            where_parts.append(f"{alias}.predicate = '{prop_uri}'")
-            valid_inputs.append(i)
-        if not valid_inputs:
-            return None
-        row_conditions = []
-        for row in rows:
-            conds = row.get("conditions", [])
-            parts = []
-            for j, cond in enumerate(conds):
-                op = cond.get("op", "any")
-                val = cond.get("value", "")
-                if op == "any" or not val:
-                    continue
-                alias = f"inp{j}"
-                cypher_op = DT_OP_CYPHER.get(op)
-                if cypher_op is None:
-                    continue
-                if self._is_numeric(val):
-                    v_expr = val
-                    lhs = (
-                        f"CAST({alias}.object AS DOUBLE)"
-                        if op in DT_NUMERIC_OPS
-                        else f"{alias}.object"
-                    )
-                else:
-                    v_expr = f"'{val.lower()}'"
-                    lhs = (
-                        f"toLower({alias}.object)"
-                        if op in DT_STRING_OPS
-                        else f"{alias}.object"
-                    )
-                parts.append(f"{lhs} {cypher_op.format(v=v_expr)}")
-            if parts:
-                row_conditions.append("(" + " AND ".join(parts) + ")")
-        if not row_conditions:
-            return None
-        row_joiner = " AND " if dt.get("row_logic") == "and" else " OR "
-        where_parts.append(f"({row_joiner.join(row_conditions)})")
-        lines = match_parts.copy()
-        lines.append("WHERE " + " AND ".join(where_parts))
-        lines.append("RETURN DISTINCT t0.subject AS s")
-        return "\n".join(lines)
 
     @staticmethod
     def validate_table(dt):
