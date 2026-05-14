@@ -49,15 +49,22 @@ pitfalls = [
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=4.1.0",
     "httpx>=0.25.0",
     "black>=26.3.1",
     "flake8>=6.0.0",
-    "pytest-cov>=4.1.0",
     "responses>=0.24.0",
     "playwright>=1.40.0",
     "sphinx>=7.0.0",
     "myst-parser>=3.0.0",
     "pip-audit>=2.7.0",
+    # Test foundations (T-M0 onwards under CNS)
+    "hypothesis>=6.100.0",        # property-based tests (T-M6)
+    "syrupy>=4.6.0",              # snapshot tests for templates + MCP schemas
+    "testcontainers[postgres]>=4.0.0",  # ephemeral Postgres for Lakebase tests (db marker)
+    "fastmcp>=2.3.1",             # in-process MCP server tests (T-M3, mcp marker)
+    "pyyaml>=6.0",                # consumed by scripts/check_coverage.py
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -85,6 +92,57 @@ constraint-dependencies = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+addopts = "-v --tb=short --strict-markers --strict-config"
+markers = [
+    "unit: Unit tests (pure in-process, no I/O — default)",
+    "integration: Multi-module, in-proc backends",
+    "contract: Schema/contract verification (subset of integration)",
+    "e2e: Playwright browser flows (CI nightly only)",
+    "eval: LLM agent quality evals (CNS T-M4)",
+    "mcp: Exercises the MCP server (in-process or subprocess)",
+    "db: Requires ephemeral Postgres (testcontainers)",
+    "spark: Requires PySpark/Databricks Connect",
+    "external: Hits a real Databricks workspace (nightly only — fevm-ontobricks-int)",
+    "property: Hypothesis property-based tests",
+    "slow: >2s wall clock",
+    "asyncio: anyio/asyncio coroutine",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:rdflib.plugins.sparql.parser",
+    "ignore::DeprecationWarning:rdflib.plugins.parsers.notation3",
+    "ignore::DeprecationWarning:pyparsing.util",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = [
+    "src/**/_starter_kit/*",
+    "src/**/__init__.py",
+    "src/**/migrations/*",
+    "src/**/generated/*",
+    "tests/*",
+]
+parallel = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 1
+exclude_also = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.:",
+    "\\.\\.\\.",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.html]
+directory = "htmlcov"
 
 [build-system]
 requires = ["hatchling"]

@@ -60,8 +60,7 @@ src/.coding_rules.md
 # Data folder
 /data/
 
-#changelogs
-/changelogs
+# changelogs are tracked under CNS (gap #2 fix) — `.cursorrules` mandates a per-day entry per code change.
 
 # Internal notes (not pushed)
 /internal/
