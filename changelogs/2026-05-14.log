@@ -1,0 +1,86 @@
+# 2026-05-14 — CNS M1 Foundation + M2 AI Discipline (P1-P3, P5) + M3.P2 changelog gate
+
+## M1: Foundation completion (gaps #1, #8, #10, #12, #13)
+
+**Context:** T-M0 (test foundations) landed on 2026-05-12. This change closes the remaining M1 phases that the rest of CNS depends on. None change product behaviour; all are scaffolding/process.
+
+**Changes:**
+
+1. `.planning/ROADMAP.md` — bootstraps the multi-task tracking surface for the team. Mirrors GitHub Milestones; one bullet per phase; landing dates noted as work merges.
+2. `src/.coding_rules.md` — long-form coding rules with code-smell catalog, Fowler refactoring vocabulary, before/after examples, decision table for "where does new code go?". Referenced by `.cursor/05`, `.cursor/07`, `.cursor/08`, `CLAUDE.md`, `AGENTS.md`, `refactoring` skill, `code-review` skill. **Closes gap #1.**
+3. `.gitignore` — un-ignored `src/.coding_rules.md` so it's tracked.
+4. `.pre-commit-config.yaml` — black + ruff + EOF/whitespace/yaml/secrets hooks; plus two local hooks (`changelog-presence`, `forbid-gsd-imports`). **Closes gap #8.**
+5. `scripts/pre-commit/check-changelog-presence.sh` — local hook: refuse to commit src/ or tests/ changes without a `changelogs/` entry. Bypass with `SKIP=changelog-presence`.
+6. `scripts/pre-commit/forbid-gsd-imports.sh` — local hook: refuse to commit `gsd-*` skill references (CNS §3.12 anti-pattern). Bypass with `SKIP=forbid-gsd-imports`.
+7. `docs/PR_REVIEW_CHECKLIST.md` — 12-item standalone reviewer reference. Cross-linked from `code-review` skill and the PR template. **Closes gap #12.**
+8. `.github/PULL_REQUEST_TEMPLATE.md` — PR template with author checklist, Conventional-Commit title hint, MLflow-eval-run slot for agent PRs, test plan section.
+9. `commitlint.config.js` — Conventional Commits with project-specific scope enum (dtwin, ontology, agents, mcp, M1.P1, T-M0, etc.). Subject must be lowercase, no trailing period, ≤100 chars.
+10. `.github/workflows/lint-pr-title.yml` — CI check: PR titles parsed against `commitlint.config.js`. **Closes gap #10.**
+11. `.claude/worktrees/README.md` — multi-agent worktree protocol: naming, lifecycle, `.planning/` per-worktree, `changelogs/` shared with agent-suffixed sections, harness pairing rules, cleanup checklist. **Closes gap #13.**
+
+## M2: AI Discipline (P1-P3 + P5) — the critical-path lifecycle that closes gap #4
+
+**Context:** OntoBricks ships 5 production agents (`agent_owl_generator`, `agent_ontology_assistant`, `agent_auto_assignment`, `agent_auto_icon_assign`, `agent_dtwin_chat`) with **zero eval coverage today**. This change lands the rule + skill + CI gate that mandate a SPEC.md, eval dataset, and MLflow eval run for any change to `src/agents/**`. Calibration mode (`CALIBRATION_MODE=true`) is on for the first 2 weeks so the gate reports without blocking — gives the team time to fill the eval-dimensions tables in the SPEC scaffolds.
+
+**Changes:**
+
+12. `.cursor/11-ai-feature-lifecycle.mdc` — the rule. Priority 90, scoped to `src/agents/**`, `src/back/core/agents/**`, `src/mcp-server/**`. Mandates SPEC.md, dataset, MLflow URI, passing eval (or waiver). M2.P1 done.
+13. `.claude/skills/ai-feature/SKILL.md` — orchestrator skill with 7-step procedure (brainstorm → SPEC → dataset → harness → plan/impl → re-eval → ship). M2.P2 done.
+14. `.claude/skills/ai-feature/SPEC.template.md` — 10-section SPEC template. Eval-dimensions table is the gateable artefact.
+15. `.planning/agents/README.md` — status table for retroactive SPECs. Recommends starting with `agent_auto_icon_assign` (smallest, deterministic).
+16. `.planning/agents/agent_owl_generator/SPEC.md` — scaffold with proposed eval dimensions (schema_validity, class_coverage, property_quality, latency, cost). M2.P3 partial.
+17. `.planning/agents/agent_ontology_assistant/SPEC.md` — scaffold (relevance, groundedness, tool_selection, latency, cost). M2.P3 partial.
+18. `.planning/agents/agent_auto_assignment/SPEC.md` — scaffold (icon_exact_match, layout_no_overlap, f1, latency, cost). M2.P3 partial.
+19. `.planning/agents/agent_auto_icon_assign/SPEC.md` — scaffold (top1/top3 accuracy, latency, cost). M2.P3 partial. Recommended first to fully spec.
+20. `.planning/agents/agent_dtwin_chat/SPEC.md` — scaffold (groundedness, factuality, tool_selection, relevance, latency, cost). M2.P3 partial. Hardest; references the §4.6 T6 production-incident worked example for regression seed.
+21. `.github/workflows/eval-gate.yml` — G2 CI gate. Four jobs: detect changed agents, check SPEC.md present + eval-dimensions table non-empty, check dataset present + sized, check PR body for MLflow URI (or `waiver:` comment). `CALIBRATION_MODE=true` for first 2 weeks. M2.P5 done.
+
+## M3: Quality enforcement (P2 only — gap #9)
+
+22. `.github/workflows/changelog-presence.yml` — G1 CI gate. Any PR touching `src/` or `tests/` without a `changelogs/` diff fails. Bypass via `no-changelog` label (logs a warning, reviewer must ack). **Closes gap #9.** M3.P2 done.
+
+## What's left in M2
+
+- **M2.P4** — actually build the 5 eval datasets (each ≥ 20 examples). This is the hardest remaining item; needs domain knowledge per agent.
+- **M2.P6** — MCP integration test harness expansion (sample landed in T-M3, needs all 40+ tools covered).
+- **M2.P7** — eval-drift cron + `mcp-ontobricks` smoke probe (depends on M2.P4).
+
+## Files modified / created
+
+**Modified:**
+- `.gitignore`
+
+**Created:**
+- `.planning/ROADMAP.md`
+- `src/.coding_rules.md`
+- `.pre-commit-config.yaml`
+- `scripts/pre-commit/check-changelog-presence.sh`
+- `scripts/pre-commit/forbid-gsd-imports.sh`
+- `docs/PR_REVIEW_CHECKLIST.md`
+- `.github/PULL_REQUEST_TEMPLATE.md`
+- `commitlint.config.js`
+- `.github/workflows/lint-pr-title.yml`
+- `.claude/worktrees/README.md`
+- `.cursor/11-ai-feature-lifecycle.mdc`
+- `.claude/skills/ai-feature/SKILL.md`
+- `.claude/skills/ai-feature/SPEC.template.md`
+- `.planning/agents/README.md`
+- `.planning/agents/agent_owl_generator/SPEC.md`
+- `.planning/agents/agent_ontology_assistant/SPEC.md`
+- `.planning/agents/agent_auto_assignment/SPEC.md`
+- `.planning/agents/agent_auto_icon_assign/SPEC.md`
+- `.planning/agents/agent_dtwin_chat/SPEC.md`
+- `.github/workflows/eval-gate.yml`
+- `.github/workflows/changelog-presence.yml`
+
+## Tests
+
+```
+uv run pytest --collect-only -q
+# 1928 tests collected (no regression from T-M0 baseline)
+
+uv run pytest tests/back/core/w3c/shacl/ tests/mcp/ -q
+# 35 passed (SHACL + MCP samples from T-M1.P1 + T-M3 still green)
+```
+
+Pre-commit hooks not yet installed against `.git/hooks/` — local devs run `uv run pre-commit install` once. CI doesn't depend on the hook being installed locally; it depends on the CI workflows landed in this change.
