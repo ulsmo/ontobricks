@@ -294,3 +294,57 @@ uv run pytest tests/property/ -m property -q
 uv run python scripts/check-mypy-diff.py
 # OK — no new mypy errors.
 ```
+
+---
+
+# Round 5 (same day, fourth commit) — T-M1.P2 SparqlTranslator unit tests sample
+
+## T-M1.P2 sample — SparqlTranslator direct unit tests
+
+**Context:** SparqlTranslator.py is 2407 LOC with a single public method
+`translate_sparql_to_spark(sparql_query, entity_mappings, limit, ...)`.
+Full T-M1.P2 (~120 tests) requires per-visitor coverage; this round lands
+a representative slice exercising the public API end-to-end against
+canonical SPARQL inputs.
+
+**Changes:**
+1. `tests/back/core/w3c/sparql/__init__.py` + `test_sparql_translator_units.py` — 21 tests across 8 classes:
+   - `TestReturnShape` (4): dict return, success key, sql + variables keys.
+   - `TestSelectSingleVariable` (2): variable alias projection, FROM clause.
+   - `TestLimit` (5): explicit LIMIT, default, parametrized [1, 100, 1000].
+   - `TestMissingMapping` (1): raises `ValidationError` (per §4 coding rule).
+   - `TestMalformedInput` (4): empty / invalid / unclosed-brace / non-SELECT all raise `ValidationError`.
+   - `TestSelectMultipleVariables` (1): rdfs:label projection.
+   - `TestEntityMappingsRespected` (2): catalog/schema in SQL, table name in SQL.
+   - `TestSqlSafety` (2): no statement terminator inside body, no IRI-borne SQL injection.
+
+**Tests:** 21/21 pass.
+
+**Note on the OntoBricksError contract:** initial drafts of these tests asserted
+`{"success": False}` for malformed inputs. The translator's actual contract
+(per §4 of `src/.coding_rules.md`) is to raise `ValidationError`. Tests were
+updated to match the contract.
+
+## ROADMAP update
+
+2. `.planning/ROADMAP.md` — flipped T-M1.P2 from open to partial-landed.
+
+## Files modified / created (round 5)
+
+**Created:**
+- `tests/back/core/w3c/sparql/__init__.py`
+- `tests/back/core/w3c/sparql/test_sparql_translator_units.py`
+
+**Modified:**
+- `.planning/ROADMAP.md`
+- `changelogs/2026-05-14.log`
+
+## Verification
+
+```
+uv run pytest tests/back/core/w3c/sparql/ -q
+# 21 passed
+
+uv run pytest --collect-only -q
+# 2071 tests collected (21 more than round-4's 2050)
+```

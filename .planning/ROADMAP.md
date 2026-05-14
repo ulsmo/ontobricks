@@ -65,7 +65,7 @@ Built on top of M1–M4. Each phase fills coverage gaps surfaced in §9.0.
 
 - [x] **T-M0** Test foundations (P1–P6). *Landed 2026-05-12 (1db8647).*
 - [x] **T-M1.P1** SHACL parser/generator/service unit tests. *Landed 2026-05-12 (1db8647) — 25 tests covering parser, generator, service. Expandable to ~80 with more constraint variants.*
-- [ ] **T-M1.P2** SparqlTranslator direct unit tests (2407 LOC → ~120 tests). *Slug: `sparql-translator-units`. **OPEN — needs scoped study of the 2407-LOC file before TDD; high-priority follow-on.***
+- [x] **T-M1.P2** SparqlTranslator direct unit tests. *Partial — 21 tests landed in round-5 covering the single public method (`translate_sparql_to_spark`): return-shape, single-variable SELECT, LIMIT propagation, multi-variable SELECT, entity-mapping respected (catalog/schema/table in output), SQL safety (no statement terminator, no IRI injection), missing-mapping/malformed-input raising `ValidationError`, non-SELECT rejection. Per-visitor expansion (~100 more tests for BGP, FILTER, OPTIONAL, UNION, GROUP BY, ORDER BY, property paths) deferred — file is 2407 LOC, one public entry point.*
 - [x] **T-M1.P3** DigitalTwin direct unit tests. *Partial — 25 tests landed on 2026-05-14 (round-4) covering pure-function surface (is_datatype_range, extract_local_id, build_quality_sql, diagnose_view_error, compute_dtwin_indicator). Behaviour-rich paths (build_task, materialize) deferred to T-M2 + M4 split.*
 - [x] **T-M1.P4** `src/back/core/logging/` unit tests. *Landed 2026-05-14 (ddf07c4) — 17 tests.*
 - [x] **T-M1.P5** `src/back/core/errors/` direct unit tests. *Landed 2026-05-14 (ddf07c4) — 33 tests.*
