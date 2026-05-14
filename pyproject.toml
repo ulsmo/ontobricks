@@ -65,6 +65,9 @@ dev = [
     "testcontainers[postgres]>=4.0.0",  # ephemeral Postgres for Lakebase tests (db marker)
     "fastmcp>=2.3.1",             # in-process MCP server tests (T-M3, mcp marker)
     "pyyaml>=6.0",                # consumed by scripts/check_coverage.py
+    # M3.P1 quality enforcement
+    "ruff>=0.7.4",                # supersedes flake8 once the baseline is clean
+    "mypy>=1.13.0",               # type checker; runs against `mypy_baseline.txt`
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -143,6 +146,77 @@ output = "coverage.xml"
 
 [tool.coverage.html]
 directory = "htmlcov"
+
+# M3.P1 — ruff config. Replaces flake8 long-term; both run in CI during the
+# transition until the codebase is ruff-clean.
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = [
+    "src/**/_starter_kit/*",
+    "docs/sphinx/_build/*",
+    ".venv/*",
+    "htmlcov/*",
+]
+
+[tool.ruff.lint]
+# Start with a conservative ruleset; we'll widen as the codebase tolerates it.
+# E + W: pycodestyle. F: pyflakes. I: isort. UP: pyupgrade. B: bugbear (real bugs).
+# Per the M3.P1 risk-mitigation: fail only on NEW violations via the pre-commit hook
+# (`ruff --fix --exit-non-zero-on-fix`). CI uses `--no-fix` to gate.
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+    "E203",  # whitespace before ':' — clashes with black.
+    "E501",  # line too long — flake8 already enforces; let formatter own this.
+    "B008",  # function-call-in-default-argument — common in FastAPI Depends(...).
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests get more leeway: bare excepts, unused imports in conftest, etc.
+"tests/**/*.py" = ["B011", "F401", "F811"]
+# __init__.py re-exports are intentional unused imports.
+"src/**/__init__.py" = ["F401", "F403"]
+# starter-kit is template-only; never enforce.
+"src/**/_starter_kit/*" = ["ALL"]
+
+# M3.P1 — mypy config. Begin in lenient mode against the baseline; tighten over time.
+# The baseline file (`mypy_baseline.txt`) records currently-acceptable violations
+# so PRs are only gated on NEW issues. Generate with:
+#   uv run mypy src --no-error-summary > mypy_baseline.txt
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+namespace_packages = true
+explicit_package_bases = true
+ignore_missing_imports = true   # third-party untyped (rdflib, mlflow, etc.)
+follow_imports = "silent"
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+# Strict-er switches we want eventually but are not ready yet:
+disallow_untyped_defs = false
+disallow_any_explicit = false
+strict_optional = false
+# Exclude tests + generated code from the gate (tests can be strict later).
+# mypy treats these as Python regexes, not globs — use literal substrings.
+exclude = "(tests/|/_starter_kit/|docs/|build/|dist/|\\.venv/)"
+
+[[tool.mypy.overrides]]
+module = [
+    "rdflib.*",
+    "owlrl.*",
+    "pyshacl.*",
+    "real_ladybug.*",
+    "strawberry.*",
+    "databricks.*",
+    "mlflow.*",
+    "psycopg.*",
+    "psycopg_pool.*",
+    "apscheduler.*",
+    "fastmcp.*",
+]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["hatchling"]
