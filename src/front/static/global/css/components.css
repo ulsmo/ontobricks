@@ -800,3 +800,63 @@
     overflow-x: hidden;
 }
 
+/* --------------------------------------------------------------------------
+   Template utility classes (inline styles extracted per .coding_rules.md §4)
+   -------------------------------------------------------------------------- */
+
+.ob-navbar-brand-version {
+    font-size: 0.65rem;
+    font-weight: 300;
+    opacity: 0.55;
+    align-self: flex-end;
+    margin-left: 0.35em;
+    line-height: 1;
+}
+
+.ob-warehouse-status-icon {
+    color: var(--bs-secondary);
+}
+
+.ob-navbar-count-badge {
+    top: 4px;
+}
+
+.ob-form-readonly-muted {
+    background-color: #e9ecef;
+}
+
+.ob-badge-version {
+    font-size: 0.65rem;
+}
+
+.ob-progress-thin {
+    height: 4px;
+}
+
+.ob-code-editor-surface {
+    min-height: 400px;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    font-size: 12px;
+}
+
+.ob-sparksql-console {
+    min-height: 400px;
+    background: #1e1e1e;
+}
+
+.ob-autoassign-progress-bar {
+    width: 0%;
+}
+
+/* Non-!important hide — JS may override via element.style.display */
+.ob-hidden {
+    display: none;
+}
+
+.ob-home-brand-version {
+    font-size: 0.4em;
+    font-weight: 300;
+    opacity: 0.6;
+    vertical-align: middle;
+}

@@ -294,3 +294,39 @@
     pointer-events: none;
 }
 
+.registry-config-hint {
+    font-size: 0.78rem;
+}
+
+.registry-th-import-obx-versions {
+    width: 8rem;
+}
+
+.registry-th-import-obx-status {
+    width: 9rem;
+}
+
+.registry-th-import-obx-action {
+    width: 22rem;
+}
+
+.registry-th-export-check {
+    width: 2.5rem;
+}
+
+.registry-th-export-versions {
+    width: 5rem;
+}
+
+.registry-th-export-mode {
+    width: 14rem;
+}
+
+.registry-teams-filter-group {
+    max-width: 320px;
+}
+
+.registry-schedule-interval-select {
+    max-width: 110px;
+}
+

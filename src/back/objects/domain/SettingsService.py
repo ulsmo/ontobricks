@@ -583,29 +583,24 @@ class SettingsService:
         """Return per-table row counts for the Lakebase registry schema.
 
         Used by the admin Registry Location panel to give a quick at-a-
-        glance inventory of what currently lives in Lakebase. Never
-        raises — surfaces failures via ``success=False`` + ``message``.
+        glance inventory of what currently lives in Lakebase.
         """
         from back.core.databricks import get_lakebase_auth
 
         auth = get_lakebase_auth()
         if not auth.is_available:
-            return {
-                "success": False,
-                "message": "Lakebase resource not bound (PGHOST/PGUSER missing)",
-                "tables": [],
-            }
+            raise ValidationError(
+                "Lakebase resource not bound (PGHOST/PGUSER missing)"
+            )
 
         try:
             domain = get_domain(session_mgr)
             cfg = RegistryCfg.from_domain(domain, settings)
             host, token = get_databricks_host_and_token(domain, settings)
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "success": False,
-                "message": f"Could not resolve registry context: {exc}",
-                "tables": [],
-            }
+        except Exception as exc:
+            raise InfrastructureError(
+                "Could not resolve registry context", detail=str(exc)
+            ) from exc
 
         try:
             from back.objects.registry.store import RegistryFactory
@@ -623,17 +618,13 @@ class SettingsService:
                 database=cfg.lakebase_database,
             )
         except ImportError:
-            return {
-                "success": False,
-                "message": "Lakebase backend not installed (missing psycopg)",
-                "tables": [],
-            }
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "success": False,
-                "message": f"Could not build Lakebase store: {exc}",
-                "tables": [],
-            }
+            raise InfrastructureError(
+                "Lakebase backend not installed (missing psycopg)"
+            )
+        except Exception as exc:
+            raise InfrastructureError(
+                "Could not build Lakebase store", detail=str(exc)
+            ) from exc
 
         tables = (
             "registries",
@@ -646,21 +637,9 @@ class SettingsService:
         )
         try:
             counts = store.table_row_counts(tables)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("Lakebase table_row_counts failed")
-            # Surface the *kind* of failure so the admin can
-            # distinguish "schema not initialised yet" from "service
-            # principal lacks USAGE" or "instance unreachable" — the
-            # 0-rows-everywhere alternative used to mask real
-            # deployment problems.
-            return {
-                "success": False,
-                "schema": cfg.lakebase_schema,
-                "initialized": False,
-                "reason": "table_count_failed",
-                "message": f"Could not query Lakebase: {exc}",
-                "tables": [{"name": t, "rows": 0} for t in tables],
-            }
+            raise InfrastructureError("Could not query Lakebase", detail=str(exc)) from exc
         # Use the detailed probe so the UI can distinguish "missing
         # USAGE on the schema" (silent before — looked like an empty
         # registry) from genuine first-run states. Falls back to the
@@ -1203,7 +1182,7 @@ class SettingsService:
         """Probe Lakebase Postgres for the configured graph schema (read-only).
 
         Uses ``graph_engine_config.database`` (optional) and ``schema`` from
-        registry global config. Never raises — failures become ``success=False``.
+        registry global config.
         """
         import os
 
@@ -1216,27 +1195,21 @@ class SettingsService:
         auth = get_lakebase_auth()
         port = int(os.environ.get("PGPORT", "5432") or "5432")
         bound_db = os.environ.get("PGDATABASE", "").strip()
-        out: Dict[str, Any] = {
-            "success": False,
-            "reason": "",
-            "message": "",
-            "host": os.environ.get("PGHOST", "") or os.environ.get("LAKEBASE_PROJECT", "")
-                    + ("/" + os.environ.get("LAKEBASE_BRANCH", "") if os.environ.get("LAKEBASE_BRANCH") else ""),
-            "port": port,
-            "bound_database": bound_db or "",
-            "effective_database": "",
-            "graph_schema": default_schema(),
-            "schema_exists": False,
-            "tables_in_schema": 0,
-        }
+        host_display = (
+            os.environ.get("PGHOST", "")
+            or os.environ.get("LAKEBASE_PROJECT", "")
+            + (
+                "/" + os.environ.get("LAKEBASE_BRANCH", "")
+                if os.environ.get("LAKEBASE_BRANCH")
+                else ""
+            )
+        )
 
         if not auth.is_available:
-            out["reason"] = "no_binding"
-            out["message"] = (
+            raise ValidationError(
                 "Lakebase not available — set LAKEBASE_PROJECT + LAKEBASE_BRANCH + PGUSER "
                 "in .env (local), or bind a Databricks App postgres resource (deployed)."
             )
-            return out
 
         try:
             _, host, token, registry_cfg = SettingsService._resolve_context(
@@ -1246,11 +1219,11 @@ class SettingsService:
             gcfg = global_config_service.get_graph_engine_config(
                 host, token, registry_cfg
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("graph_engine_lakebase_health context failed: %s", exc)
-            out["reason"] = "context"
-            out["message"] = f"Could not load graph engine config: {exc}"
-            return out
+            raise InfrastructureError(
+                "Could not load graph engine config", detail=str(exc)
+            ) from exc
 
         db_override = ""
         schema_raw = ""
@@ -1261,29 +1234,26 @@ class SettingsService:
         try:
             schema = validate_graph_schema(schema_raw or default_schema())
         except ValueError as exc:
-            out["reason"] = "bad_schema"
-            out["message"] = str(exc)
-            out["graph_schema"] = schema_raw or default_schema()
-            return out
+            raise ValidationError(str(exc)) from exc
 
-        out["graph_schema"] = schema
         base_db = bound_db or auth.database
         effective_db = db_override or base_db
-        out["bound_database"] = base_db
-        out["effective_database"] = effective_db
 
         try:
             from back.core.graphdb.lakebase.pool import _require_psycopg
 
             psycopg, _ = _require_psycopg()
         except ImportError as exc:
-            out["reason"] = "no_psycopg"
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "Lakebase backend not installed (missing psycopg)",
+                detail=str(exc),
+            ) from exc
 
         kwargs = auth.kwargs(application_name="ontobricks-graph-health")
         kwargs["dbname"] = effective_db
 
+        schema_exists = False
+        table_count = 0
         try:
             with psycopg.connect(**kwargs) as conn:
                 with conn.cursor() as cur:
@@ -1298,8 +1268,6 @@ class SettingsService:
                     )
                     row = cur.fetchone()
                     schema_exists = bool(row[0]) if row else False
-                    out["schema_exists"] = schema_exists
-                    table_count = 0
                     if schema_exists:
                         cur.execute(
                             """
@@ -1312,19 +1280,27 @@ class SettingsService:
                         )
                         row2 = cur.fetchone()
                         table_count = int(row2[0]) if row2 else 0
-                    out["tables_in_schema"] = table_count
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("graph_engine_lakebase_health probe failed: %s", exc)
-            out["reason"] = "connect_failed"
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "Lakebase health probe failed", detail=str(exc)
+            ) from exc
 
-        out["success"] = True
-        out["reason"] = "ok"
+        out: Dict[str, Any] = {
+            "success": True,
+            "reason": "ok",
+            "host": host_display,
+            "port": port,
+            "bound_database": base_db,
+            "effective_database": effective_db,
+            "graph_schema": schema,
+            "schema_exists": schema_exists,
+            "tables_in_schema": table_count,
+        }
         if schema_exists:
             out["message"] = (
                 f"Connected to database {effective_db!r}; schema {schema!r} exists "
-                f"({out['tables_in_schema']} table(s))."
+                f"({table_count} table(s))."
             )
         else:
             out["message"] = (
@@ -1340,10 +1316,8 @@ class SettingsService:
     ) -> Dict[str, Any]:
         """List Unity Catalog names (``SHOW CATALOGS``) for the Lakebase UC picker.
 
-        Read-only; uses the configured SQL warehouse. Returns an empty list with
-        ``success=False`` when the warehouse is missing or the query fails.
+        Read-only; uses the configured SQL warehouse.
         """
-        out: Dict[str, Any] = {"success": False, "catalogs": [], "message": ""}
         try:
             domain, host, token, registry_cfg = SettingsService._resolve_context(
                 session_mgr, settings
@@ -1359,39 +1333,40 @@ class SettingsService:
             if not warehouse_id:
                 warehouse_id = settings.sql_warehouse_id or ""
             if not warehouse_id:
-                out["message"] = (
+                raise ValidationError(
                     "Configure a SQL warehouse under Settings → Databricks first."
                 )
-                return out
             from back.core.databricks.DatabricksAuth import DatabricksAuth
             from back.core.databricks.UnityCatalog import UnityCatalog
 
             auth = DatabricksAuth(host=host, token=token, warehouse_id=warehouse_id)
             uc = UnityCatalog(auth)
             catalogs = uc.get_catalogs()
-            out["success"] = True
-            out["catalogs"] = sorted(catalogs) if catalogs else []
-            return out
-        except Exception as exc:  # noqa: BLE001
+            return {
+                "success": True,
+                "catalogs": sorted(catalogs) if catalogs else [],
+            }
+        except OntoBricksError:
+            raise
+        except Exception as exc:
             logger.warning("graph_engine_uc_catalogs failed: %s", exc)
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "list Unity Catalog catalogs failed", detail=str(exc)
+            ) from exc
 
     @staticmethod
     def graph_engine_lakebase_projects_result(
-        session_mgr: SessionManager,
-        settings: Settings,
+        _session_mgr: SessionManager,
+        _settings: Settings,
     ) -> Dict[str, Any]:
         """List all Lakebase Autoscaling projects visible in the workspace."""
-        out: Dict[str, Any] = {"success": False, "projects": [], "message": ""}
         try:
             from databricks.sdk import WorkspaceClient
 
             w = WorkspaceClient()
             api = getattr(w, "api_client", None)
             if api is None or not hasattr(api, "do"):
-                out["message"] = "Databricks SDK api_client unavailable"
-                return out
+                raise InfrastructureError("Databricks SDK api_client unavailable")
             raw = (api.do("GET", "/api/2.0/postgres/projects") or {}).get("projects") or []
             projects = []
             for p in raw:
@@ -1405,33 +1380,31 @@ class SettingsService:
                     "short_name": short,
                     "state": status.get("state") or "",
                 })
-            out["success"] = True
-            out["projects"] = projects
-            return out
-        except Exception as exc:  # noqa: BLE001
+            return {"success": True, "projects": projects}
+        except OntoBricksError:
+            raise
+        except Exception as exc:
             logger.warning("graph_engine_lakebase_projects failed: %s", exc)
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "list Lakebase projects failed", detail=str(exc)
+            ) from exc
 
     @staticmethod
     def graph_engine_lakebase_branches_result(
         project_path: str,
-        session_mgr: SessionManager,
-        settings: Settings,
+        _session_mgr: SessionManager,
+        _settings: Settings,
     ) -> Dict[str, Any]:
         """List branches for a Lakebase Autoscaling project."""
-        out: Dict[str, Any] = {"success": False, "branches": [], "message": ""}
         if not project_path:
-            out["message"] = "project_path is required"
-            return out
+            raise ValidationError("project_path is required")
         try:
             from databricks.sdk import WorkspaceClient
 
             w = WorkspaceClient()
             api = getattr(w, "api_client", None)
             if api is None or not hasattr(api, "do"):
-                out["message"] = "Databricks SDK api_client unavailable"
-                return out
+                raise InfrastructureError("Databricks SDK api_client unavailable")
             # Normalise: accept both short name and full resource path
             if not project_path.startswith("projects/"):
                 project_path = f"projects/{project_path}"
@@ -1450,33 +1423,31 @@ class SettingsService:
                     "short_name": short,
                     "state": status.get("state") or "",
                 })
-            out["success"] = True
-            out["branches"] = branches
-            return out
-        except Exception as exc:  # noqa: BLE001
+            return {"success": True, "branches": branches}
+        except OntoBricksError:
+            raise
+        except Exception as exc:
             logger.warning("graph_engine_lakebase_branches failed: %s", exc)
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "list Lakebase branches failed", detail=str(exc)
+            ) from exc
 
     @staticmethod
     def graph_engine_lakebase_pg_databases_result(
         branch_path: str,
-        session_mgr: SessionManager,
-        settings: Settings,
+        _session_mgr: SessionManager,
+        _settings: Settings,
     ) -> Dict[str, Any]:
         """List Postgres databases on a Lakebase branch endpoint."""
-        out: Dict[str, Any] = {"success": False, "databases": [], "message": ""}
         if not branch_path:
-            out["message"] = "branch_path is required"
-            return out
+            raise ValidationError("branch_path is required")
         try:
             from databricks.sdk import WorkspaceClient
 
             w = WorkspaceClient()
             api = getattr(w, "api_client", None)
             if api is None or not hasattr(api, "do"):
-                out["message"] = "Databricks SDK api_client unavailable"
-                return out
+                raise InfrastructureError("Databricks SDK api_client unavailable")
             raw = (
                 api.do("GET", f"/api/2.0/postgres/{branch_path}/databases") or {}
             ).get("databases") or []
@@ -1486,30 +1457,31 @@ class SettingsService:
                 pg_name = status.get("postgres_database") or ""
                 if pg_name:
                     databases.append(pg_name)
-            out["success"] = True
-            out["databases"] = sorted(databases)
-            return out
-        except Exception as exc:  # noqa: BLE001
+            return {"success": True, "databases": sorted(databases)}
+        except OntoBricksError:
+            raise
+        except Exception as exc:
             logger.warning("graph_engine_lakebase_pg_databases failed: %s", exc)
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "list Lakebase Postgres databases failed", detail=str(exc)
+            ) from exc
 
     @staticmethod
     def graph_engine_lakebase_pg_schemas_result(
         database: str,
-        session_mgr: SessionManager,
-        settings: Settings,
+        _session_mgr: SessionManager,
+        _settings: Settings,
     ) -> Dict[str, Any]:
         """List Postgres schemas in a Lakebase database (using the bound instance)."""
-        out: Dict[str, Any] = {"success": False, "schemas": [], "message": ""}
         try:
             from back.core.databricks import get_lakebase_auth
             from back.core.graphdb.lakebase.pool import _require_psycopg
 
             auth = get_lakebase_auth()
             if not auth.is_available:
-                out["message"] = "Lakebase resource not bound (LAKEBASE_PROJECT/LAKEBASE_BRANCH/PGUSER missing)"
-                return out
+                raise ValidationError(
+                    "Lakebase resource not bound (LAKEBASE_PROJECT/LAKEBASE_BRANCH/PGUSER missing)"
+                )
             psycopg, _ = _require_psycopg()
             kwargs = auth.kwargs(application_name="ontobricks-schema-list")
             if database:
@@ -1525,13 +1497,19 @@ class SettingsService:
                         """
                     )
                     schemas = [row[0] for row in cur.fetchall()]
-            out["success"] = True
-            out["schemas"] = schemas
-            return out
-        except Exception as exc:  # noqa: BLE001
+            return {"success": True, "schemas": schemas}
+        except OntoBricksError:
+            raise
+        except ImportError as exc:
+            raise InfrastructureError(
+                "Lakebase backend not installed (missing psycopg)",
+                detail=str(exc),
+            ) from exc
+        except Exception as exc:
             logger.warning("graph_engine_lakebase_pg_schemas failed: %s", exc)
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "list Lakebase Postgres schemas failed", detail=str(exc)
+            ) from exc
 
     @staticmethod
     def _lakebase_kwargs_for_branch(
@@ -1606,8 +1584,8 @@ class SettingsService:
     def graph_engine_lakebase_objects_result(
         database: str,
         branch_path: str,
-        session_mgr: SessionManager,
-        settings: Settings,
+        _session_mgr: SessionManager,
+        _settings: Settings,
     ) -> Dict[str, Any]:
         """List all user schemas, tables and views in a Lakebase database.
 
@@ -1615,16 +1593,7 @@ class SettingsService:
         so the result reflects the live form state rather than the saved config.
         Falls back to the bound Lakebase auth when ``branch_path`` is empty.
         Returns the Postgres ``current_user`` so the frontend can display it.
-        Never raises — failures become ``success=False``.
         """
-        out: Dict[str, Any] = {
-            "success": False,
-            "current_user": "",
-            "schemas": [],
-            "tables": [],
-            "views": [],
-            "message": "",
-        }
         try:
             from back.core.graphdb.lakebase.pool import _require_psycopg
 
@@ -1639,18 +1608,17 @@ class SettingsService:
 
                 auth = get_lakebase_auth()
                 if not auth.is_available:
-                    out["message"] = (
+                    raise ValidationError(
                         "Lakebase resource not bound "
                         "(LAKEBASE_PROJECT/LAKEBASE_BRANCH/PGUSER missing)"
                     )
-                    return out
                 kwargs = auth.kwargs(application_name="ontobricks-obj-list")
                 if database:
                     kwargs["dbname"] = database
             with psycopg.connect(**kwargs) as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT current_user")
-                    out["current_user"] = (cur.fetchone() or ("",))[0]
+                    current_user = (cur.fetchone() or ("",))[0]
 
                     cur.execute(
                         """
@@ -1663,9 +1631,7 @@ class SettingsService:
                         ORDER BY nspname
                         """
                     )
-                    out["schemas"] = [
-                        {"name": r[0], "owner": r[1]} for r in cur.fetchall()
-                    ]
+                    schemas = [{"name": r[0], "owner": r[1]} for r in cur.fetchall()]
 
                     cur.execute(
                         """
@@ -1684,7 +1650,7 @@ class SettingsService:
                         ORDER BY t.schemaname, t.tablename
                         """
                     )
-                    out["tables"] = [
+                    tables = [
                         {"schema": r[0], "name": r[1], "owner": r[2]}
                         for r in cur.fetchall()
                     ]
@@ -1706,17 +1672,30 @@ class SettingsService:
                         ORDER BY v.schemaname, v.viewname
                         """
                     )
-                    out["views"] = [
+                    views = [
                         {"schema": r[0], "name": r[1], "owner": r[2]}
                         for r in cur.fetchall()
                     ]
 
-            out["success"] = True
-            return out
-        except Exception as exc:  # noqa: BLE001
+            return {
+                "success": True,
+                "current_user": current_user,
+                "schemas": schemas,
+                "tables": tables,
+                "views": views,
+            }
+        except OntoBricksError:
+            raise
+        except ImportError as exc:
+            raise InfrastructureError(
+                "Lakebase backend not installed (missing psycopg)",
+                detail=str(exc),
+            ) from exc
+        except Exception as exc:
             logger.warning("graph_engine_lakebase_objects failed: %s", exc)
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "list Lakebase database objects failed", detail=str(exc)
+            ) from exc
 
     @staticmethod
     def graph_engine_lakebase_drop_object_result(
@@ -1725,21 +1704,20 @@ class SettingsService:
         name: str,
         database: str,
         branch_path: str,
-        session_mgr: SessionManager,
-        settings: Settings,
+        _session_mgr: SessionManager,
+        _settings: Settings,
     ) -> Dict[str, Any]:
         """Drop a Postgres schema, table or view in the connected Lakebase database.
 
         ``kind`` must be one of ``schema``, ``table``, ``view``.
         Schemas are dropped with CASCADE.  Uses ``branch_path`` when provided
         so the drop targets the form's current connection, not the saved config.
-        Never raises — failures become ``success=False``.
         """
-        out: Dict[str, Any] = {"success": False, "message": ""}
         allowed_kinds = {"schema", "table", "view"}
         if kind not in allowed_kinds:
-            out["message"] = f"kind must be one of {allowed_kinds}, got: {kind!r}"
-            return out
+            raise ValidationError(
+                f"kind must be one of {allowed_kinds}, got: {kind!r}"
+            )
 
         def _q(ident: str) -> str:
             return '"' + ident.replace('"', '""') + '"'
@@ -1748,13 +1726,11 @@ class SettingsService:
             ddl = f"DROP SCHEMA {_q(name)} CASCADE"
         elif kind == "table":
             if not schema:
-                out["message"] = "schema is required for kind=table"
-                return out
+                raise ValidationError("schema is required for kind=table")
             ddl = f"DROP TABLE {_q(schema)}.{_q(name)}"
         else:
             if not schema:
-                out["message"] = "schema is required for kind=view"
-                return out
+                raise ValidationError("schema is required for kind=view")
             ddl = f"DROP VIEW {_q(schema)}.{_q(name)}"
 
         try:
@@ -1771,11 +1747,10 @@ class SettingsService:
 
                 auth = get_lakebase_auth()
                 if not auth.is_available:
-                    out["message"] = (
+                    raise ValidationError(
                         "Lakebase resource not bound "
                         "(LAKEBASE_PROJECT/LAKEBASE_BRANCH/PGUSER missing)"
                     )
-                    return out
                 kwargs = auth.kwargs(application_name="ontobricks-obj-drop")
                 if database:
                     kwargs["dbname"] = database
@@ -1783,13 +1758,19 @@ class SettingsService:
             with psycopg.connect(**kwargs) as conn:
                 with conn.cursor() as cur:
                     cur.execute(ddl)
-            out["success"] = True
-            out["message"] = f"Dropped {kind}: {ddl}"
-            return out
-        except Exception as exc:  # noqa: BLE001
+            return {"success": True, "message": f"Dropped {kind}: {ddl}"}
+        except OntoBricksError:
+            raise
+        except ImportError as exc:
+            raise InfrastructureError(
+                "Lakebase backend not installed (missing psycopg)",
+                detail=str(exc),
+            ) from exc
+        except Exception as exc:
             logger.warning("graph_engine_lakebase_drop_object failed: %s", exc)
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "Lakebase drop object failed", detail=str(exc)
+            ) from exc
 
     @staticmethod
     def graph_engine_uc_schemas_result(
@@ -1798,10 +1779,8 @@ class SettingsService:
         settings: Settings,
     ) -> Dict[str, Any]:
         """List Unity Catalog schemas in a given catalog."""
-        out: Dict[str, Any] = {"success": False, "schemas": [], "message": ""}
         if not catalog:
-            out["message"] = "catalog is required"
-            return out
+            raise ValidationError("catalog is required")
         try:
             domain, host, token, registry_cfg = SettingsService._resolve_context(
                 session_mgr, settings
@@ -1817,21 +1796,26 @@ class SettingsService:
             if not warehouse_id:
                 warehouse_id = settings.sql_warehouse_id or ""
             if not warehouse_id:
-                out["message"] = "Configure a SQL warehouse under Settings → Databricks first."
-                return out
+                raise ValidationError(
+                    "Configure a SQL warehouse under Settings → Databricks first."
+                )
             from back.core.databricks.DatabricksAuth import DatabricksAuth
             from back.core.databricks.UnityCatalog import UnityCatalog
 
             auth = DatabricksAuth(host=host, token=token, warehouse_id=warehouse_id)
             uc = UnityCatalog(auth)
             schemas = uc.get_schemas(catalog)
-            out["success"] = True
-            out["schemas"] = sorted(schemas) if schemas else []
-            return out
-        except Exception as exc:  # noqa: BLE001
+            return {
+                "success": True,
+                "schemas": sorted(schemas) if schemas else [],
+            }
+        except OntoBricksError:
+            raise
+        except Exception as exc:
             logger.warning("graph_engine_uc_schemas failed: %s", exc)
-            out["message"] = str(exc)
-            return out
+            raise InfrastructureError(
+                "list Unity Catalog schemas failed", detail=str(exc)
+            ) from exc
 
     @staticmethod
     def build_permissions_me(

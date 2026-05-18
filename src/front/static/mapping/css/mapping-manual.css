@@ -3,6 +3,11 @@
  * Styles for the Manual Mapping Tree View with Bottom Panel
  */
 
+/* Card body fills flex column (was inline min-height:0) */
+.mapping-manual-main-card-body {
+    min-height: 0;
+}
+
 /* Vertical split container */
 .manual-vertical-container {
     display: flex;

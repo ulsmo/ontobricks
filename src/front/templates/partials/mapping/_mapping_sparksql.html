@@ -1,7 +1,7 @@
 <!-- Spark SQL Viewer Section -->
 
 <!-- Loading overlay (shown until data loads) -->
-<div id="sparksqlLoadingOverlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(248, 249, 250, 0.95); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 10;">
+<div id="sparksqlLoadingOverlay">
     <div class="ob-loading-spinner">
         <svg class="ob-spinner-svg" viewBox="0 0 80 80" fill="none">
             <g class="ob-ring">
@@ -51,7 +51,7 @@
             Execute queries from the Query page to see specific SQL translations.
         </p>
         
-        <div id="mappingSqlContent" class="border rounded" style="min-height: 400px; background: #1e1e1e;">
+        <div id="mappingSqlContent" class="border rounded ob-sparksql-console">
         </div>
     </div>
 </div>

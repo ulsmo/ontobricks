@@ -40,3 +40,12 @@
 .group-members-grid .form-check-input:checked + .form-check-label {
     font-weight: 600;
 }
+
+.group-icon-preview-sized {
+    font-size: 1.2rem;
+}
+
+.group-members-list-scroll {
+    max-height: 300px;
+    overflow-y: auto;
+}

@@ -17,10 +17,13 @@ from back.objects.session import get_domain
 from back.objects.registry import ROLE_ADMIN, require
 
 from api.routers.internal._permissions import filter_visible_domains
+from api.routers.internal._helpers import map_route_errors
+from back.core.logging import get_logger
 
 from back.objects.domain import SettingsService as config_service
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
+logger = get_logger(__name__)
 
 
 def _settings_request_identity(request: Request) -> tuple[str, str, str, str, str]:
@@ -219,11 +222,13 @@ async def get_lakebase_stats(
     """Return per-table row counts for the Lakebase registry schema.
 
     Powers the read-only inventory grid in the Registry Location
-    panel. Returns ``success=False`` with a human-readable
-    ``message`` when the Lakebase resource is not bound or the
-    backend is not installed.
+    panel. Raises :class:`~back.core.errors.ValidationError` or
+    :class:`~back.core.errors.InfrastructureError` when the Lakebase
+    resource is not bound, the backend is not installed, or the store
+    cannot be queried.
     """
-    return config_service.lakebase_stats_result(session_mgr, settings)
+    with map_route_errors("registry lakebase stats", logger):
+        return config_service.lakebase_stats_result(session_mgr, settings)
 
 
 @router.get("/registry/domains")
@@ -797,7 +802,8 @@ async def get_graph_engine_lakebase_health(
     settings: Settings = Depends(get_settings),
 ):
     """Probe Lakebase connectivity and graph schema (saved global config)."""
-    return config_service.graph_engine_lakebase_health_result(session_mgr, settings)
+    with map_route_errors("graph engine Lakebase health", logger):
+        return config_service.graph_engine_lakebase_health_result(session_mgr, settings)
 
 
 @router.get("/graph-engine/uc-catalogs")
@@ -806,7 +812,8 @@ async def get_graph_engine_uc_catalogs(
     settings: Settings = Depends(get_settings),
 ):
     """Unity Catalog names for the Lakebase managed-sync UC catalog picker (read-only)."""
-    return config_service.graph_engine_uc_catalogs_result(session_mgr, settings)
+    with map_route_errors("graph engine UC catalogs", logger):
+        return config_service.graph_engine_uc_catalogs_result(session_mgr, settings)
 
 
 @router.get("/graph-engine/uc-schemas")
@@ -816,7 +823,8 @@ async def get_graph_engine_uc_schemas(
     settings: Settings = Depends(get_settings),
 ):
     """Unity Catalog schemas within a catalog for the managed-sync UC schema picker."""
-    return config_service.graph_engine_uc_schemas_result(catalog, session_mgr, settings)
+    with map_route_errors("graph engine UC schemas", logger):
+        return config_service.graph_engine_uc_schemas_result(catalog, session_mgr, settings)
 
 
 @router.get("/graph-engine/lakebase-projects")
@@ -825,7 +833,8 @@ async def get_graph_engine_lakebase_projects(
     settings: Settings = Depends(get_settings),
 ):
     """List Lakebase Autoscaling projects visible in the workspace."""
-    return config_service.graph_engine_lakebase_projects_result(session_mgr, settings)
+    with map_route_errors("graph engine Lakebase projects", logger):
+        return config_service.graph_engine_lakebase_projects_result(session_mgr, settings)
 
 
 @router.get("/graph-engine/lakebase-branches")
@@ -835,7 +844,10 @@ async def get_graph_engine_lakebase_branches(
     settings: Settings = Depends(get_settings),
 ):
     """List branches for a Lakebase Autoscaling project."""
-    return config_service.graph_engine_lakebase_branches_result(project, session_mgr, settings)
+    with map_route_errors("graph engine Lakebase branches", logger):
+        return config_service.graph_engine_lakebase_branches_result(
+            project, session_mgr, settings
+        )
 
 
 @router.get("/graph-engine/lakebase-pg-databases")
@@ -845,7 +857,10 @@ async def get_graph_engine_lakebase_pg_databases(
     settings: Settings = Depends(get_settings),
 ):
     """List Postgres databases on a Lakebase branch."""
-    return config_service.graph_engine_lakebase_pg_databases_result(branch, session_mgr, settings)
+    with map_route_errors("graph engine Lakebase PG databases", logger):
+        return config_service.graph_engine_lakebase_pg_databases_result(
+            branch, session_mgr, settings
+        )
 
 
 @router.get("/graph-engine/lakebase-pg-schemas")
@@ -855,7 +870,10 @@ async def get_graph_engine_lakebase_pg_schemas(
     settings: Settings = Depends(get_settings),
 ):
     """List Postgres schemas in a Lakebase database."""
-    return config_service.graph_engine_lakebase_pg_schemas_result(database, session_mgr, settings)
+    with map_route_errors("graph engine Lakebase PG schemas", logger):
+        return config_service.graph_engine_lakebase_pg_schemas_result(
+            database, session_mgr, settings
+        )
 
 
 @router.get("/graph-engine/lakebase-objects")
@@ -871,9 +889,10 @@ async def get_graph_engine_lakebase_objects(
     the form's current branch selection; when supplied the connection targets
     that branch directly rather than the saved/bound config.
     """
-    return config_service.graph_engine_lakebase_objects_result(
-        database, branch_path, session_mgr, settings
-    )
+    with map_route_errors("graph engine Lakebase objects", logger):
+        return config_service.graph_engine_lakebase_objects_result(
+            database, branch_path, session_mgr, settings
+        )
 
 
 @router.post("/graph-engine/lakebase-drop-object")
@@ -884,15 +903,16 @@ async def post_graph_engine_lakebase_drop_object(
 ):
     """Drop a Postgres schema, table or view in the connected Lakebase database (admin only)."""
     data = await request.json()
-    return config_service.graph_engine_lakebase_drop_object_result(
-        kind=data.get("kind", ""),
-        schema=data.get("schema", ""),
-        name=data.get("name", ""),
-        database=data.get("database", ""),
-        branch_path=data.get("branch_path", ""),
-        session_mgr=session_mgr,
-        settings=settings,
-    )
+    with map_route_errors("graph engine Lakebase drop object", logger):
+        return config_service.graph_engine_lakebase_drop_object_result(
+            kind=data.get("kind", ""),
+            schema=data.get("schema", ""),
+            name=data.get("name", ""),
+            database=data.get("database", ""),
+            branch_path=data.get("branch_path", ""),
+            session_mgr=session_mgr,
+            settings=settings,
+        )
 
 
 @router.post("/graph-engine-config")

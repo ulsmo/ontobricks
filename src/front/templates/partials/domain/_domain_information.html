@@ -58,9 +58,8 @@
                                 <label for="domainVersion" class="form-label">
                                     <i class="bi bi-hash"></i> Version
                                 </label>
-                                <input type="text" class="form-control" id="domainVersionDisplay"
-                                       value="v{{ domain.version or '1' }}" readonly
-                                       style="background-color: #e9ecef;">
+                                <input type="text" class="form-control ob-form-readonly-muted" id="domainVersionDisplay"
+                                       value="v{{ domain.version or '1' }}" readonly>
                                 <input type="hidden" id="domainVersionSelect" value="{{ domain.version or '1' }}">
                             </div>
                         </div>
@@ -90,11 +89,10 @@
                                     <label class="form-check-label small text-muted" for="baseUriCustomToggle">Custom</label>
                                 </div>
                             </div>
-                            <input type="text" class="form-control domain-editable" id="domainBaseUri" 
+                            <input type="text" class="form-control domain-editable ob-form-readonly-muted" id="domainBaseUri" 
                                    placeholder="https://example.org/ontology#" 
                                    value="{{ domain.base_uri or '' }}"
-                                   readonly
-                                   style="background-color: #e9ecef;">
+                                   readonly>
                             <small class="text-muted">
                                 <span id="baseUriHint">Auto-generated from <a href="/settings">Settings</a> default base URI domain and domain name.</span>
                             </small>
@@ -166,10 +164,9 @@
                             </label>
                             <div class="input-group">
                                 <span class="input-group-text bg-light"><i class="bi bi-database"></i></span>
-                                <input type="text" class="form-control font-monospace" id="domainTriplestoreFullName"
+                                <input type="text" class="form-control font-monospace ob-form-readonly-muted" id="domainTriplestoreFullName"
                                        value="{% if domain.delta.catalog and domain.delta.schema and domain.delta.table_name %}{{ domain.delta.catalog }}.{{ domain.delta.schema }}.{{ domain.delta.table_name }}{% endif %}"
-                                       readonly placeholder="Configure the registry in Settings to enable the Triple-Store"
-                                       style="background-color: #e9ecef;">
+                                       readonly placeholder="Configure the registry in Settings to enable the Triple-Store">
                             </div>
                             <small class="text-muted">
                                 <i class="bi bi-info-circle me-1"></i>The Triple-Store VIEW is always created in the

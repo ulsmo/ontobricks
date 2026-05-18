@@ -153,7 +153,7 @@
                     <div class="text-center">
                         <canvas id="gaugeMappingEntities" width="130" height="72"></canvas>
                         <div class="small text-muted mt-1"><span id="mappedEntitiesCount">-</span> / <span id="totalEntitiesCount">-</span> mapped</div>
-                        <span id="ignoredEntitiesLabel" class="badge bg-secondary bg-opacity-25 text-secondary mt-1" style="display:none; font-size:.7rem;"><i class="bi bi-eye-slash me-1"></i></span>
+                        <span id="ignoredEntitiesLabel" class="badge bg-secondary bg-opacity-25 text-secondary mt-1 ob-badge-ignored-tight" style="display:none;"><i class="bi bi-eye-slash me-1"></i></span>
                     </div>
                     <div id="mappingIssues" class="mb-1"></div>
                     <div id="mappingWarnings"></div>
@@ -170,7 +170,7 @@
                     <div class="text-center">
                         <canvas id="gaugeMappingRels" width="130" height="72"></canvas>
                         <div class="small text-muted mt-1"><span id="mappedRelationshipsCount">-</span> / <span id="totalRelationshipsCount">-</span> mapped</div>
-                        <span id="ignoredRelationshipsLabel" class="badge bg-secondary bg-opacity-25 text-secondary mt-1" style="display:none; font-size:.7rem;"><i class="bi bi-eye-slash me-1"></i></span>
+                        <span id="ignoredRelationshipsLabel" class="badge bg-secondary bg-opacity-25 text-secondary mt-1 ob-badge-ignored-tight" style="display:none;"><i class="bi bi-eye-slash me-1"></i></span>
                     </div>
                 </div>
             </div>
@@ -198,7 +198,7 @@
             <span><i class="bi bi-box-fill me-1"></i> Digital Twin</span>
             <div class="d-flex align-items-center gap-2">
                 <span id="dtwinValidationBadge" class="badge bg-secondary">Checking...</span>
-                <a href="/dtwin/" class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size:.78rem;">
+                <a href="/dtwin/" class="btn btn-outline-primary btn-sm py-0 px-2 validation-dtwin-link">
                     <i class="bi bi-box-arrow-up-right me-1"></i>Open
                 </a>
             </div>
@@ -293,7 +293,7 @@
 
     <!-- Missing Items Detail -->
     <div class="col-12">
-    <div class="card validation-detail-card h-100" id="missingItemsCard" style="display: none;">
+    <div class="card validation-detail-card h-100 ob-hidden" id="missingItemsCard">
         <div class="card-header">
             <i class="bi bi-exclamation-triangle text-warning me-1"></i> Missing Assignments
         </div>

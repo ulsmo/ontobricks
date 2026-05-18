@@ -1,0 +1,13 @@
+/* Standalone access-denied page (extends Bootstrap only) */
+
+.ob-access-denied-root {
+    min-height: 100vh;
+}
+
+.ob-access-denied-inner {
+    max-width: 520px;
+}
+
+.ob-access-denied-icon {
+    font-size: 4rem;
+}

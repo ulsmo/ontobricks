@@ -17,14 +17,14 @@
                 <button class="nav-link active" id="expressions-tab" data-bs-toggle="tab"
                         data-bs-target="#expressionsPane" type="button" role="tab">
                     <i class="bi bi-collection me-1"></i>Expressions
-                    <span class="badge bg-primary bg-opacity-75 ms-1" id="expressionsCount" style="font-size:.65rem"></span>
+                    <span class="badge bg-primary bg-opacity-75 ms-1 ob-axiom-count-badge" id="expressionsCount"></span>
                 </button>
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="axioms-tab" data-bs-toggle="tab"
                         data-bs-target="#axiomsPane" type="button" role="tab">
                     <i class="bi bi-signpost-split me-1"></i>Axioms
-                    <span class="badge bg-success bg-opacity-75 ms-1" id="axiomsCount" style="font-size:.65rem"></span>
+                    <span class="badge bg-success bg-opacity-75 ms-1 ob-axiom-count-badge" id="axiomsCount"></span>
                 </button>
             </li>
         </ul>
@@ -38,7 +38,7 @@
                 </p>
                 <div id="expressionsList">
                     <div class="text-center py-4 text-muted" id="noExpressionsMessage">
-                        <i class="bi bi-collection" style="font-size:1.5rem"></i>
+                        <i class="bi bi-collection fs-4"></i>
                         <p class="mt-2 mb-0 small">No expressions defined</p>
                         <small>Click <strong>+ Expression</strong> to compose classes with set operations (union, intersection, ...)</small>
                     </div>
@@ -52,7 +52,7 @@
                 </p>
                 <div id="axiomsList">
                     <div class="text-center py-4 text-muted" id="noAxiomsMessage">
-                        <i class="bi bi-signpost-split" style="font-size:1.5rem"></i>
+                        <i class="bi bi-signpost-split fs-4"></i>
                         <p class="mt-2 mb-0 small">No axioms defined</p>
                         <small>Click <strong>+ Axiom</strong> to declare relationships like equivalence, disjointness, or inverse</small>
                     </div>
@@ -114,20 +114,20 @@
                             <option value="">Select...</option>
                         </select>
                     </div>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="addObjectBtn" onclick="AxiomsModule.addObjectSelect()" style="display: none;">
+                    <button type="button" class="btn btn-sm btn-outline-secondary ob-hidden" id="addObjectBtn" onclick="AxiomsModule.addObjectSelect()">
                         <i class="bi bi-plus"></i> Add Another
                     </button>
                 </div>
                 
                 <!-- Individuals for OneOf -->
-                <div class="mb-3" id="individualsGroup" style="display: none;">
+                <div class="mb-3 ob-hidden" id="individualsGroup">
                     <label class="form-label">Individuals (comma-separated)</label>
                     <input type="text" class="form-control" id="axiomIndividuals" placeholder="e.g., Red, Green, Blue">
                     <small class="text-muted">List the individual names that make up this enumeration</small>
                 </div>
                 
                 <!-- Property Chain -->
-                <div class="mb-3" id="chainGroup" style="display: none;">
+                <div class="mb-3 ob-hidden" id="chainGroup">
                     <label class="form-label">Property Chain</label>
                     <div id="chainSelectContainer">
                         <div class="input-group mb-2">

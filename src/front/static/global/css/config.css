@@ -196,3 +196,25 @@
     font-size: 0.82rem;
 }
 
+/* Settings → Graph DB & admin badges (inline styles → classes) */
+.settings-badge-admin-note {
+    font-size: 0.65rem;
+}
+
+.settings-graph-engine-select {
+    max-width: 22rem;
+}
+
+.settings-summary-cursor {
+    cursor: pointer;
+}
+
+.settings-logo-preview-box {
+    width: 56px;
+    height: 56px;
+}
+
+.settings-registry-ttl-input {
+    max-width: 200px;
+}
+

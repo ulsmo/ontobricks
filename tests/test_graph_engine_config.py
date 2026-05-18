@@ -486,9 +486,8 @@ class TestGraphEngineLakebaseHealth:
         auth = MagicMock()
         auth.is_available = False
         with patch("back.core.databricks.get_lakebase_auth", return_value=auth):
-            out = SettingsService.graph_engine_lakebase_health_result(session_mgr, settings)
-        assert out["success"] is False
-        assert out["reason"] == "no_binding"
+            with pytest.raises(ValidationError, match="Lakebase not available"):
+                SettingsService.graph_engine_lakebase_health_result(session_mgr, settings)
 
     def test_probe_success_schema_exists(self):
         session_mgr, settings = _mock_context()
@@ -568,9 +567,8 @@ class TestGraphEngineLakebaseHealth:
             patch.object(_svc_module, "global_config_service") as gcs,
         ):
             gcs.get_graph_engine_config.return_value = {"schema": "99bad"}
-            out = SettingsService.graph_engine_lakebase_health_result(session_mgr, settings)
-        assert out["success"] is False
-        assert out["reason"] == "bad_schema"
+            with pytest.raises(ValidationError):
+                SettingsService.graph_engine_lakebase_health_result(session_mgr, settings)
 
 
 class TestGraphEngineUcCatalogs:
@@ -590,9 +588,8 @@ class TestGraphEngineUcCatalogs:
         ):
             gcs.load = MagicMock()
             gcs.get_warehouse_id.return_value = ""
-            out = SettingsService.graph_engine_uc_catalogs_result(session_mgr, settings)
-        assert out["success"] is False
-        assert "warehouse" in (out.get("message") or "").lower()
+            with pytest.raises(ValidationError, match="warehouse"):
+                SettingsService.graph_engine_uc_catalogs_result(session_mgr, settings)
 
     def test_returns_sorted_catalogs(self):
         session_mgr, settings = _mock_context()

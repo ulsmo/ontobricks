@@ -97,7 +97,7 @@
                 <div class="mb-4">
                     <label class="form-label fw-semibold">
                         SQL Warehouse
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
+                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2 settings-badge-admin-note">
                             <i class="bi bi-shield-lock me-1"></i>Admin only &ndash; applies to all users
                         </span>
                     </label>
@@ -175,11 +175,11 @@
                 <div class="mb-4">
                     <label for="graphEngineSelect" class="form-label fw-semibold mb-2">
                         Graph DB Engine
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
+                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2 settings-badge-admin-note">
                             <i class="bi bi-shield-lock me-1"></i>Admin only
                         </span>
                     </label>
-                    <select class="form-select form-select-sm" id="graphEngineSelect" style="max-width:22rem;">
+                    <select class="form-select form-select-sm settings-graph-engine-select" id="graphEngineSelect">
                         <option value="lakebase">Lakebase (Postgres)</option>
                     </select>
                     <small class="text-muted d-block mt-2">
@@ -307,9 +307,8 @@
                                 <label class="form-label small fw-semibold mb-1">UC schema (sync registration)</label>
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text bg-light"><i class="bi bi-diagram-3"></i></span>
-                                    <input type="text" class="form-control form-control-sm font-monospace"
+                                    <input type="text" class="form-control form-control-sm font-monospace ob-form-readonly-muted"
                                            id="lakebaseUcSchemaDisplay" readonly
-                                           style="background-color:#e9ecef;"
                                            placeholder="(same as Postgres schema)">
                                 </div>
                                 <div class="form-text small mt-1 mb-0 text-muted">
@@ -333,7 +332,7 @@
 
                     <hr class="my-3 opacity-25">
                     <details id="lakebaseObjectsDetails">
-                        <summary class="fw-semibold small user-select-none" style="cursor:pointer;">
+                        <summary class="fw-semibold small user-select-none settings-summary-cursor">
                             <i class="bi bi-trash me-1"></i> Lakebase objects &mdash; schemas / tables / views
                         </summary>
                         <p class="small text-muted mt-2 mb-2">
@@ -368,9 +367,9 @@
 
                 <!-- Optional raw JSON (advanced) -->
                 <details class="mb-4" id="graphEngineConfigDetails">
-                    <summary class="form-label fw-semibold mb-2 user-select-none" style="cursor:pointer;">
+                    <summary class="form-label fw-semibold mb-2 user-select-none settings-summary-cursor">
                         Advanced: raw engine configuration (JSON)
-                        <span class="badge bg-secondary border ms-2" style="font-size:0.65rem;">optional</span>
+                        <span class="badge bg-secondary border ms-2 ob-badge-version">optional</span>
                     </summary>
                     <p class="small text-muted">Form fields above are merged into this object on <strong>Save</strong>. Edit only if you need extra keys not exposed in the UI.</p>
                     <textarea class="form-control font-monospace" id="graphEngineConfig"
@@ -386,7 +385,7 @@
                 <div class="mb-4">
                     <label for="baseUriDefault" class="form-label fw-semibold">
                         Default Base URI Domain
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
+                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2 settings-badge-admin-note">
                             <i class="bi bi-shield-lock me-1"></i>Admin only &ndash; applies to all users
                         </span>
                     </label>
@@ -400,7 +399,7 @@
                 <div class="mb-4">
                     <label class="form-label fw-semibold">
                         Default Class Icon
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
+                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2 settings-badge-admin-note">
                             <i class="bi bi-shield-lock me-1"></i>Admin only &ndash; applies to all users
                         </span>
                     </label>
@@ -418,13 +417,12 @@
                 <div class="mb-4">
                     <label class="form-label fw-semibold">
                         Application Logo
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
+                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2 settings-badge-admin-note">
                             <i class="bi bi-shield-lock me-1"></i>Admin only &ndash; applies to all users
                         </span>
                     </label>
                     <div class="d-flex align-items-center gap-3 mb-2">
-                        <div class="d-flex align-items-center justify-content-center border rounded bg-dark"
-                             style="width: 56px; height: 56px;">
+                        <div class="d-flex align-items-center justify-content-center border rounded bg-dark settings-logo-preview-box">
                             <img id="navbarLogoPreview"
                                  src="{{ url_for('static', filename='global/img/favicon.svg') }}?v=2"
                                  alt="Current logo" width="32" height="32">
@@ -452,12 +450,12 @@
                 <div class="mb-4">
                     <label for="registryCacheTtl" class="form-label fw-semibold">
                         Registry Cache TTL (seconds)
-                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" style="font-size:0.65rem;">
+                        <span class="badge bg-warning-subtle text-warning-emphasis border ms-2 settings-badge-admin-note">
                             <i class="bi bi-shield-lock me-1"></i>Admin only &ndash; applies to all users
                         </span>
                     </label>
-                    <input type="number" class="form-control" id="registryCacheTtl"
-                           min="10" step="10" value="300" style="max-width:200px;">
+                    <input type="number" class="form-control settings-registry-ttl-input" id="registryCacheTtl"
+                           min="10" step="10" value="300">
                     <small class="text-muted">
                         <i class="bi bi-info-circle"></i> How long the registry domain list is cached before refreshing from Databricks (minimum 10s).
                     </small>

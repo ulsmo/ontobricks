@@ -11,3 +11,25 @@
 .wizard-step.completed .fw-semibold { color: #198754; }
 .wizard-step-icon { width: 24px; text-align: center; }
 .wizard-step-icon i { font-size: 1.2rem; transition: all 0.3s ease; }
+
+.wizard-metadata-table-wrap {
+    max-height: calc(100vh - 370px);
+    overflow-y: auto;
+}
+
+.wizard-metadata-th-check {
+    width: 40px;
+}
+
+.wizard-metadata-th-cols {
+    width: 80px;
+}
+
+.wizard-docs-list-scroll {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.ob-wizard-owl-preview {
+    font-size: 0.85rem;
+}

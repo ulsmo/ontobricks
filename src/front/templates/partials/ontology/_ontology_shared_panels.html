@@ -17,12 +17,12 @@
                 <!-- Step 1: Table Selection -->
                 <div id="metaAttrStep1">
                     <label class="form-label small fw-semibold mb-1">Select a table</label>
-                    <div id="metaAttrTableList" class="list-group list-group-flush" style="max-height: 300px; overflow-y: auto;">
+                    <div id="metaAttrTableList" class="list-group list-group-flush meta-attr-table-scroll">
                         <div class="text-muted small p-2">Loading...</div>
                     </div>
                 </div>
                 <!-- Step 2: Column Selection -->
-                <div id="metaAttrStep2" style="display: none;">
+                <div id="metaAttrStep2" class="ob-hidden">
                     <div class="d-flex align-items-center gap-2 mb-2">
                         <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="metaAttrBackToTables()">
                             <i class="bi bi-arrow-left"></i>
@@ -36,11 +36,11 @@
                             <label class="form-check-label small" for="metaAttrSelectAll">All</label>
                         </div>
                     </div>
-                    <div id="metaAttrColumnList" class="list-group list-group-flush" style="max-height: 280px; overflow-y: auto;">
+                    <div id="metaAttrColumnList" class="list-group list-group-flush meta-attr-column-scroll">
                     </div>
                 </div>
             </div>
-            <div class="modal-footer py-1" id="metaAttrFooter" style="display: none;">
+            <div class="modal-footer py-1 ob-hidden" id="metaAttrFooter">
                 <span class="small text-muted me-auto" id="metaAttrSelectionCount">0 selected</span>
                 <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-sm btn-primary" onclick="metaAttrApplySelection()">

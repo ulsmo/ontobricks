@@ -2,7 +2,7 @@
 <!-- R2RML Content Section -->
 
 <!-- Loading overlay (shown until data loads) -->
-<div id="r2rmlLoadingOverlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(248, 249, 250, 0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;">
+<div id="r2rmlLoadingOverlay" class="mapping-loading-overlay">
     <div class="ob-loading-spinner">
         <svg class="ob-spinner-svg" viewBox="0 0 80 80" fill="none">
             <g class="ob-ring">
@@ -51,8 +51,7 @@
         <div id="r2rmlStatusMessage" class="alert alert-info d-none mb-2">
             <i class="bi bi-info-circle"></i> <span id="r2rmlStatusText"></span>
         </div>
-        <textarea class="form-control font-monospace flex-grow-1" id="r2rmlPreview" readonly 
-                  style="min-height: 400px; background-color: #1e1e1e; color: #d4d4d4; font-size: 12px;"
+        <textarea class="form-control font-monospace flex-grow-1 ob-code-editor-surface" id="r2rmlPreview" readonly 
                   placeholder="R2RML will be generated when you create entity and relationship mappings..."></textarea>
     </div>
 </div>

@@ -78,6 +78,22 @@
     width: 60%;
 }
 
+.dm-th-version-col {
+    width: 100px;
+}
+
+.dm-th-mcp-col {
+    width: 130px;
+}
+
+.dm-th-author-col {
+    width: 160px;
+}
+
+.dm-th-actions-col {
+    width: 100px;
+}
+
 .meta-cursor-pointer {
     cursor: pointer;
 }

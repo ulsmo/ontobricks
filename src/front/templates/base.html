@@ -57,7 +57,7 @@
             <a class="navbar-brand d-flex align-items-center" href="{{ menu_config.brand.route }}">
                 <img id="brandLogoImg" src="{{ url_for('static', filename='global/img/favicon.svg') }}?v=2" alt="{{ menu_config.brand.label }}" width="24" height="24" class="me-2">
                 {{ menu_config.brand.label }}
-                {% if app_version %}<span style="font-size: 0.65rem; font-weight: 300; opacity: 0.55; align-self: flex-end; margin-left: 0.35em; line-height: 1;">v{{ app_version }}</span>{% endif %}
+                {% if app_version %}<span class="ob-navbar-brand-version">v{{ app_version }}</span>{% endif %}
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
@@ -158,14 +158,14 @@
                     <!-- SQL Warehouse status indicator (admin-only) -->
                     <li class="nav-item" data-requires-app="admin">
                         <a class="nav-link" href="/settings" id="warehouseStatusLink" title="SQL Warehouse – click to configure">
-                            <i class="bi bi-server" id="warehouseStatusIcon" style="color: var(--bs-secondary);"></i>
+                            <i class="bi bi-server ob-warehouse-status-icon" id="warehouseStatusIcon"></i>
                         </a>
                     </li>
                     <!-- Task Tracker -->
                     <li class="nav-item dropdown">
                         <a class="nav-link position-relative" href="#" id="taskTrackerToggle" title="Background tasks">
                             <i class="bi bi-hourglass-split"></i>
-                            <span id="taskTrackerBadge" class="position-absolute start-100 translate-middle badge rounded-pill bg-danger" style="display: none; top: 4px;">
+                            <span id="taskTrackerBadge" class="position-absolute start-100 translate-middle badge rounded-pill bg-danger ob-hidden ob-navbar-count-badge">
                                 0
                             </span>
                         </a>
@@ -188,7 +188,7 @@
                     <li class="nav-item dropdown">
                         <a class="nav-link position-relative" href="#" id="notifCenterToggle" title="Notifications">
                             <i class="bi bi-bell" id="notifCenterIcon"></i>
-                            <span id="notifCenterBadge" class="position-absolute start-100 translate-middle badge rounded-pill bg-danger" style="display: none; top: 4px;">
+                            <span id="notifCenterBadge" class="position-absolute start-100 translate-middle badge rounded-pill bg-danger ob-navbar-count-badge" style="display: none;">
                                 0
                             </span>
                         </a>

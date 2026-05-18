@@ -9,16 +9,16 @@
         <button type="button" class="btn btn-sm btn-outline-primary" id="startAutoAssignBtn" onclick="AutoAssignModule.start()">
             <i class="bi bi-lightning-charge me-1"></i> Map All
         </button>
-        <button type="button" class="btn btn-sm btn-outline-warning" id="reassignAttrsBtn" onclick="AutoAssignModule.startPartial()" style="display: none;">
+        <button type="button" class="btn btn-sm btn-outline-warning ob-hidden" id="reassignAttrsBtn" onclick="AutoAssignModule.startPartial()">
             <i class="bi bi-tags me-1"></i> Re-Assign Missing Attributes
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="cancelAutoAssignBtn" onclick="AutoAssignModule.cancel()" style="display: none;">
+        <button type="button" class="btn btn-sm btn-outline-secondary ob-hidden" id="cancelAutoAssignBtn" onclick="AutoAssignModule.cancel()">
             <i class="bi bi-x-circle me-1"></i> Cancel
         </button>
     </div>
 </div>
 <div class="card h-100 border-0 shadow-sm d-flex flex-column">
-    <div class="card-body flex-grow-1 d-flex flex-column" style="min-height: 0; overflow-y: auto;">
+    <div class="card-body flex-grow-1 d-flex flex-column autoassign-card-body-scroll">
         <!-- Description -->
         <div class="alert alert-info mb-4">
             <i class="bi bi-info-circle me-2"></i>
@@ -54,15 +54,15 @@
         </div>
         
         <!-- Progress Section (hidden initially) -->
-        <div id="autoAssignProgressSection" class="mb-4" style="display: none;">
+        <div id="autoAssignProgressSection" class="mb-4 ob-hidden">
             <div class="card border">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="fw-semibold" id="autoAssignProgressLabel">Processing...</span>
                         <span class="text-muted small" id="autoAssignProgressCount">0 / 0</span>
                     </div>
-                    <div class="progress" style="height: 24px;">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="autoAssignProgressBar" role="progressbar" style="width: 0%;">
+                    <div class="progress autoassign-progress-tall">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated ob-autoassign-progress-bar" id="autoAssignProgressBar" role="progressbar">
                             <span id="autoAssignProgressPercent">0%</span>
                         </div>
                     </div>
@@ -75,7 +75,7 @@
         
         
         <!-- Report Section (hidden initially) -->
-        <div id="autoAssignReportSection" style="display: none;">
+        <div id="autoAssignReportSection" class="ob-hidden">
             <div class="card border">
                 <div class="card-header bg-light d-flex justify-content-between align-items-center">
                     <span class="fw-semibold"><i class="bi bi-clipboard-check me-2"></i>Mapping Report</span>
@@ -100,11 +100,11 @@
                         </div>
                     </div>
                     <!-- Detailed Results -->
-                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <div class="table-responsive autoassign-report-table-wrap">
                         <table class="table table-sm table-hover mb-0">
                             <thead class="table-light sticky-top">
                                 <tr>
-                                    <th style="width: 40px;">Status</th>
+                                    <th class="autoassign-th-status">Status</th>
                                     <th>Type</th>
                                     <th>Name</th>
                                     <th>Details</th>

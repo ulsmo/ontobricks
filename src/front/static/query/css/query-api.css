@@ -51,3 +51,9 @@
 
 .api-domain-select { max-width: 280px; font-size: 0.85rem; }
 .api-version-select { max-width: 140px; font-size: 0.85rem; }
+
+/* GraphQL toolbar (_query_graphql.html) */
+.graphql-depth-select {
+    width: auto;
+    min-width: 60px;
+}

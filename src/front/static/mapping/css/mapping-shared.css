@@ -18,6 +18,20 @@
     z-index: 10;
 }
 
+#sparksqlLoadingOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(248, 249, 250, 0.95);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
 /* Summary tiles now use shared .ob-kpi-tile from components.css */
 
 /* SQL Wizard Table Selection Styles */
@@ -34,4 +48,22 @@
 }
 .wizard-table-item:hover {
     background-color: rgba(0,0,0,0.02);
+}
+
+.autoassign-card-body-scroll {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.autoassign-progress-tall {
+    height: 24px;
+}
+
+.autoassign-report-table-wrap {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.autoassign-th-status {
+    width: 40px;
 }
