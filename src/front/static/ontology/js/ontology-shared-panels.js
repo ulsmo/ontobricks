@@ -1599,7 +1599,10 @@ async function saveSharedEntity() {
     console.log('[SharedPanel] Saving - classData.dashboardParams:', JSON.stringify(classData.dashboardParams));
     
     if (sharedPanelEditIndex >= 0) {
-        const oldName = OntologyState.config.classes[sharedPanelEditIndex].name;
+        const existing = OntologyState.config.classes[sharedPanelEditIndex] || {};
+        const oldName = existing.name;
+        // Preserve server-assigned URI so the backend prune doesn't orphan mappings.
+        if (existing.uri) classData.uri = existing.uri;
         OntologyState.config.classes[sharedPanelEditIndex] = classData;
         if (oldName !== name) {
             OntologyState.config.classes.forEach(c => { if (c.parent === oldName) c.parent = name; });
@@ -2011,6 +2014,9 @@ async function saveSharedRelationship() {
     const isRename = sharedPanelEditIndex >= 0 && sharedPanelOriginalName && sharedPanelOriginalName !== name;
     
     if (sharedPanelEditIndex >= 0) {
+        const existingProp = OntologyState.config.properties[sharedPanelEditIndex] || {};
+        // Preserve server-assigned URI so the backend prune doesn't orphan mappings.
+        if (existingProp.uri) propertyData.uri = existingProp.uri;
         OntologyState.config.properties[sharedPanelEditIndex] = propertyData;
         showNotification('Relationship updated', 'success', 2000);
     } else {
