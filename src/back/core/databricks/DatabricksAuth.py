@@ -34,6 +34,7 @@ class DatabricksAuth:
 
     # Class-level cache: { (host, warehouse_id): (capable, reason, ts) }
     _cloud_fetch_cache: Dict[Tuple[str, str], Tuple[bool, str, float]] = {}
+    _resolving_cloud_fetch: bool = False
 
     @staticmethod
     def is_databricks_app() -> bool:
@@ -56,6 +57,9 @@ class DatabricksAuth:
     @staticmethod
     def _resolve_global_cloud_fetch_default(host: str, token: str) -> bool:
         """Best-effort load of global CloudFetch setting (default: enabled)."""
+        if DatabricksAuth._resolving_cloud_fetch:
+            return True
+        DatabricksAuth._resolving_cloud_fetch = True
         try:
             from shared.config.settings import get_settings
             from back.objects.registry import RegistryCfg
@@ -74,6 +78,8 @@ class DatabricksAuth:
                 exc,
             )
             return True
+        finally:
+            DatabricksAuth._resolving_cloud_fetch = False
 
     @staticmethod
     def get_workspace_host() -> str:
