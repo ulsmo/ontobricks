@@ -12,6 +12,7 @@ engine transparently degrades to a single-shot generation (no tool calls).
 import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 import requests
@@ -59,6 +60,19 @@ class AgentResult:
 # =====================================================
 # System prompt
 # =====================================================
+
+_PITFALL_RULES_PATH = Path(__file__).parent.parent / "PITFALL_RULES.md"
+
+
+def _load_pitfall_rules() -> str:
+    """Load pitfall rules from the shared agents/PITFALL_RULES.md file."""
+    if not _PITFALL_RULES_PATH.exists():
+        raise FileNotFoundError(
+            f"Pitfall rules file not found: {_PITFALL_RULES_PATH}. "
+            "Ensure PITFALL_RULES.md is present in src/agents/."
+        )
+    return _PITFALL_RULES_PATH.read_text(encoding="utf-8")
+
 
 SYSTEM_PROMPT = """\
 
@@ -188,12 +202,76 @@ If you detect a likely inconsistency or anti-pattern, correct it before output a
 ## 7. In general
 - Avoid orphans entities (try to have entities with relationships)
 
-"""
+""" + _load_pitfall_rules()
 
 
 # =====================================================
 # Internal helpers
 # =====================================================
+
+# Pitfall IDs that do not require ML deps — safe to run inside the agent loop.
+_NON_ML_PATTERNS = [
+    "P1.1", "P1.2", "P1.3",
+    "P2.1", "P2.2", "P2.3", "P2.4", "P2.5", "P2.6",
+    "P3.1", "P3.2", "P3.3",
+    "P4.1",
+]
+
+
+def _check_owl_pitfalls(turtle_text: str, iteration: int) -> Optional[str]:
+    """Parse *turtle_text* as an rdflib Graph, run non-ML pitfall checks, and
+    return a feedback prompt string if any issues are found, or ``None`` if clean.
+
+    Gracefully returns ``None`` on parse errors or missing optional deps so that
+    a pitfall-check failure never blocks OWL delivery.
+    """
+    try:
+        from rdflib import Graph
+        from back.core.external.pitfalls import PitfallsService
+        import tempfile, os
+
+        graph = Graph()
+        graph.parse(data=turtle_text, format="turtle")
+
+        svc = PitfallsService()
+        result = svc.run_analysis(graph, patterns=_NON_ML_PATTERNS)
+
+        issues = {
+            pid: r
+            for pid, r in result["results"].items()
+            if isinstance(r.get("count"), int) and r["count"] > 0
+        }
+        if not issues:
+            logger.info("Iteration %d: pitfall check — ontology is CLEAN", iteration)
+            return None
+
+        total = sum(r["count"] for r in issues.values())
+        logger.info(
+            "Iteration %d: pitfall check — %d issue(s) in %d pattern(s): %s",
+            iteration,
+            total,
+            len(issues),
+            list(issues.keys()),
+        )
+
+        lines = [
+            "The Turtle ontology you just produced has the following pitfall issues. "
+            "Please fix ALL of them and output the corrected Turtle (no markdown, no comments, "
+            "starting with @prefix declarations):\n"
+        ]
+        for pid, r in issues.items():
+            lines.append(f"**{pid}** — {r.get('title', pid)} ({r['count']} occurrence(s))")
+            for item in (r.get("items") or [])[:5]:
+                lines.append(f"  • {item}")
+        return "\n".join(lines)
+
+    except Exception as exc:
+        logger.warning(
+            "Iteration %d: pitfall check skipped due to error: %s",
+            iteration,
+            exc,
+        )
+        return None
 
 
 def _build_user_prompt(
@@ -386,6 +464,8 @@ def run_agent(
     # Agent loop
     # ------------------------------------------------------------------
     tools_supported = True
+    _owl_fix_rounds = 0          # number of pitfall-fix rounds already done
+    _MAX_OWL_FIX_ROUNDS = 2      # cap to avoid runaway retries
 
     for iteration in range(MAX_ITERATIONS):
         logger.info(
@@ -634,6 +714,25 @@ def run_agent(
                     duration_ms=elapsed_ms,
                 )
             )
+
+            # ----------------------------------------------------------
+            # Pitfall verification — parse OWL and run structural checks.
+            # If issues are found and we still have fix rounds remaining,
+            # feed the issues back to the LLM and continue the loop.
+            # ----------------------------------------------------------
+            pitfall_feedback = _check_owl_pitfalls(content, iteration + 1)
+            if pitfall_feedback and _owl_fix_rounds < _MAX_OWL_FIX_ROUNDS:
+                _owl_fix_rounds += 1
+                notify(f"Pitfall issues found — fix round {_owl_fix_rounds}/{_MAX_OWL_FIX_ROUNDS}…")
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": pitfall_feedback})
+                logger.info(
+                    "Iteration %d: %d pitfall issue(s) detected — starting fix round %d",
+                    iteration + 1,
+                    pitfall_feedback.count("**"),
+                    _owl_fix_rounds,
+                )
+                continue   # next iteration will produce fixed OWL
 
             result.success = True
             result.owl_content = content

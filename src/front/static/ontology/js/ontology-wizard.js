@@ -35,17 +35,6 @@ async function initOntologyWizard() {
     if (savedTaskId) {
         console.log('[Wizard] Found saved task:', savedTaskId);
         await checkAndResumeTask(savedTaskId);
-    } else {
-        // No running task - check for previously generated OWL
-        const savedOWL = sessionStorage.getItem(WIZARD_OWL_KEY);
-        if (savedOWL) {
-            console.log('[Wizard] Restoring previously generated OWL');
-            let stats = {};
-            try {
-                stats = JSON.parse(sessionStorage.getItem(WIZARD_STATS_KEY) || '{}');
-            } catch (e) { /* ignore parse errors */ }
-            showWizardResults({ owl_content: savedOWL, stats: stats });
-        }
     }
     
     await loadWizardMetadata();
@@ -252,37 +241,13 @@ async function monitorWizardTask(taskId) {
 async function showWizardResults(result) {
     wizardGeneratedOWL = result.owl_content;
     
-    // Persist OWL and stats to sessionStorage so they survive page navigation
+    // Persist OWL to sessionStorage so it survives page navigation (retry on failure)
     try {
         sessionStorage.setItem(WIZARD_OWL_KEY, result.owl_content);
         sessionStorage.setItem(WIZARD_STATS_KEY, JSON.stringify(result.stats || {}));
     } catch (e) {
         console.warn('[Wizard] Could not persist OWL to sessionStorage:', e);
     }
-    
-    // Show preview briefly (stats only, OWL available for copy/download)
-    document.getElementById('wizardOWLPreview').value = result.owl_content;
-    
-    const stats = result.stats || {};
-    const agentSteps = result.agent_steps || [];
-    const agentIter = result.agent_iterations || 0;
-
-    let statsHtml = `
-        <div class="d-flex gap-4 text-muted flex-wrap">
-            <span><i class="bi bi-box me-1"></i><strong>${stats.classes || 0}</strong> entities</span>
-            <span><i class="bi bi-arrow-left-right me-1"></i><strong>${stats.properties || 0}</strong> relationships</span>
-            <span><i class="bi bi-list me-1"></i><strong>${stats.dataProperties || 0}</strong> attributes</span>`;
-    if (agentIter) {
-        statsHtml += `<span class="ms-auto"><i class="bi bi-robot me-1"></i>${agentIter} agent steps</span>`;
-    }
-    statsHtml += `</div>`;
-
-    if (agentSteps.length) {
-        statsHtml += renderAgentStepsLog(agentSteps);
-    }
-
-    document.getElementById('wizardPreviewStats').innerHTML = statsHtml;
-    document.getElementById('wizardPreviewCard').style.display = 'block';
     
     const applied = await applyWizardOntologySilent();
     if (applied) {
@@ -298,8 +263,8 @@ async function showWizardResults(result) {
         }
         showNotification('Ontology created successfully!', 'success');
     } else {
-        // On failure, keep preview visible so user can retry via Apply button
-        document.getElementById('wizardPreviewCard').scrollIntoView({ behavior: 'smooth' });
+        showNotification('Auto-apply failed. Click Generate again to retry.', 'warning');
+        clearWizardPreview();
     }
 }
 
@@ -652,7 +617,7 @@ function sleep(ms) {
  * Copy generated OWL to clipboard
  */
 function copyWizardOWL() {
-    const owlContent = document.getElementById('wizardOWLPreview').value;
+    const owlContent = wizardGeneratedOWL;
     if (owlContent) {
         navigator.clipboard.writeText(owlContent).then(() => {
             showNotification('OWL content copied to clipboard', 'success', 2000);
@@ -666,7 +631,7 @@ function copyWizardOWL() {
  * Download generated OWL as file
  */
 function downloadWizardOWL() {
-    const owlContent = document.getElementById('wizardOWLPreview').value;
+    const owlContent = wizardGeneratedOWL;
     if (!owlContent) return;
     
     const blob = new Blob([owlContent], { type: 'text/turtle' });
@@ -687,8 +652,6 @@ function downloadWizardOWL() {
  * Clear the preview
  */
 function clearWizardPreview() {
-    document.getElementById('wizardPreviewCard').style.display = 'none';
-    document.getElementById('wizardOWLPreview').value = '';
     wizardGeneratedOWL = null;
     
     // Clear persisted OWL from sessionStorage
