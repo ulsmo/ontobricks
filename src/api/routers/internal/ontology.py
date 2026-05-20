@@ -24,6 +24,7 @@ from agents.serialization import serialize_agent_steps
 from back.core.industry import (
     get_fibo_catalog,
     get_cdisc_catalog,
+    get_fhir_catalog,
     get_iof_catalog,
 )
 from back.core.logging import get_logger
@@ -282,6 +283,7 @@ _INDUSTRY_CATALOGS = {
     "fibo": get_fibo_catalog,
     "cdisc": get_cdisc_catalog,
     "iof": get_iof_catalog,
+    "fhir": get_fhir_catalog,
 }
 
 

@@ -13,4 +13,7 @@ FIBO_BASE_URL = "https://spec.edmcouncil.org/fibo/ontology/master/latest"
 
 IOF_BASE_URL = "https://raw.githubusercontent.com/iofoundry/ontology/master"
 
+FHIR_BASE_URL = "https://hl7.org/fhir/R5"
+FHIR_NS = "http://hl7.org/fhir/"
+
 MMS = Namespace("http://rdf.cdisc.org/mms#")

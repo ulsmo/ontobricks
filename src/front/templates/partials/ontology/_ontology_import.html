@@ -40,6 +40,12 @@
                 <i class="bi bi-gear-wide-connected"></i> IOF
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-fhir" data-bs-toggle="tab" data-bs-target="#pane-fhir"
+                    type="button" role="tab" aria-controls="pane-fhir" aria-selected="false">
+                <i class="bi bi-hospital"></i> FHIR
+            </button>
+        </li>
     </ul>
 
     <!-- Tab Content -->
@@ -331,6 +337,106 @@
                 <div class="progress ob-progress-thin">
                     <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary w-100"
                          id="iofImportProgressBar" role="progressbar"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- FHIR Tab -->
+        <div class="tab-pane fade" id="pane-fhir" role="tabpanel" aria-labelledby="tab-fhir">
+            <h6 class="mb-2">
+                <i class="bi bi-hospital"></i> Import HL7 FHIR R5 Ontology
+                <span class="badge bg-danger ms-2">Healthcare</span>
+            </h6>
+            <p class="text-muted small mb-2">
+                <a href="https://hl7.org/fhir/R5/" target="_blank" rel="noopener">HL7 FHIR R5</a>
+                (Fast Healthcare Interoperability Resources) is the leading standard for
+                healthcare data exchange, published by
+                <a href="https://www.hl7.org/" target="_blank" rel="noopener">HL7 International</a>.
+                It defines 150+ resource types covering clinical, diagnostic, medication,
+                workflow, and financial healthcare concepts.
+            </p>
+            <p class="text-muted small mb-3">
+                Select the resource domains you need below. <strong>Foundation</strong>
+                is always included as it provides the base Resource and DomainResource types.
+                The ontology is fetched directly from
+                <a href="https://hl7.org/fhir/R5/fhir.ttl" target="_blank" rel="noopener">hl7.org</a>
+                as a single Turtle file (~3 MB).
+            </p>
+
+            <!-- Domain checkboxes -->
+            <div class="row g-2 mb-3" id="fhirDomainCheckboxes">
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="fhirDomainFOUNDATION" value="FOUNDATION" checked disabled>
+                        <label class="form-check-label" for="fhirDomainFOUNDATION">
+                            <i class="bi bi-layers text-secondary"></i> <strong>Foundation (required)</strong>
+                            <small class="text-muted d-block">Resource, DomainResource, Bundle, CapabilityStatement</small>
+                        </label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input fhir-domain-cb" type="checkbox" id="fhirDomainCLINICAL" value="CLINICAL">
+                        <label class="form-check-label" for="fhirDomainCLINICAL">
+                            <i class="bi bi-person-heart text-danger"></i> <strong>Clinical</strong>
+                            <small class="text-muted d-block">Patient, Encounter, Condition, Procedure, AllergyIntolerance, Device</small>
+                        </label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input fhir-domain-cb" type="checkbox" id="fhirDomainDIAGNOSTICS" value="DIAGNOSTICS">
+                        <label class="form-check-label" for="fhirDomainDIAGNOSTICS">
+                            <i class="bi bi-activity text-info"></i> <strong>Diagnostics</strong>
+                            <small class="text-muted d-block">DiagnosticReport, ImagingStudy, Specimen, Observation, MolecularSequence</small>
+                        </label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input fhir-domain-cb" type="checkbox" id="fhirDomainMEDICATIONS" value="MEDICATIONS">
+                        <label class="form-check-label" for="fhirDomainMEDICATIONS">
+                            <i class="bi bi-capsule text-success"></i> <strong>Medications</strong>
+                            <small class="text-muted d-block">Medication, MedicationRequest, MedicationDispense, Substance</small>
+                        </label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input fhir-domain-cb" type="checkbox" id="fhirDomainWORKFLOW" value="WORKFLOW">
+                        <label class="form-check-label" for="fhirDomainWORKFLOW">
+                            <i class="bi bi-diagram-3 text-primary"></i> <strong>Workflow</strong>
+                            <small class="text-muted d-block">Task, Appointment, Schedule, RequestOrchestration, Transport</small>
+                        </label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input fhir-domain-cb" type="checkbox" id="fhirDomainFINANCIAL" value="FINANCIAL">
+                        <label class="form-check-label" for="fhirDomainFINANCIAL">
+                            <i class="bi bi-currency-dollar text-warning"></i> <strong>Financial</strong>
+                            <small class="text-muted d-block">Claim, Coverage, ExplanationOfBenefit, Invoice, Contract</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Import button -->
+            <button type="button" class="btn btn-outline-danger btn-sm" id="importFhirBtn">
+                <i class="bi bi-download"></i> Import Selected Domains
+            </button>
+
+            <!-- Progress indicator -->
+            <div id="fhirImportProgress" class="d-none mt-3">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <div class="spinner-border spinner-border-sm text-danger" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <small class="text-muted" id="fhirImportStatus">Fetching FHIR ontology from hl7.org... This may take 20-40 seconds.</small>
+                </div>
+                <div class="progress ob-progress-thin">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-danger w-100"
+                         id="fhirImportProgressBar" role="progressbar"></div>
                 </div>
             </div>
         </div>

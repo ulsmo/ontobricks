@@ -19,6 +19,7 @@ from shared.config.constants import DEFAULT_BASE_URI
 from back.core.industry import (
     fetch_and_parse_cdisc,
     fetch_and_parse_fibo,
+    fetch_and_parse_fhir,
     fetch_and_parse_iof,
 )
 from back.core.w3c import OntologyGenerator, OntologyParser
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from agents.agent_owl_generator.engine import AgentResult
     from back.objects.session.DomainSession import DomainSession
 
-IndustryKind = Literal["fibo", "cdisc", "iof"]
+IndustryKind = Literal["fibo", "cdisc", "iof", "fhir"]
 
 logger = get_logger(__name__)
 
@@ -39,18 +40,21 @@ _INDUSTRY_EMPTY_MESSAGE: Dict[IndustryKind, str] = {
     "fibo": "No FIBO domains selected.",
     "cdisc": "No CDISC domains selected.",
     "iof": "No IOF domains selected.",
+    "fhir": "No FHIR domains selected.",
 }
 
 _INDUSTRY_LOG_LABEL: Dict[IndustryKind, str] = {
     "fibo": "FIBO",
     "cdisc": "CDISC",
     "iof": "IOF",
+    "fhir": "FHIR",
 }
 
 _INDUSTRY_FETCH = {
     "fibo": fetch_and_parse_fibo,
     "cdisc": fetch_and_parse_cdisc,
     "iof": fetch_and_parse_iof,
+    "fhir": fetch_and_parse_fhir,
 }
 
 
@@ -941,6 +945,10 @@ class Ontology:
                 ont_name = info.get("name", "FIBO")
                 base_uri = info.get("uri", "https://spec.edmcouncil.org/fibo/ontology/")
                 desc_prefix = "Financial Industry Business Ontology (FIBO) – "
+            elif kind == "fhir":
+                ont_name = info.get("name", "HL7 FHIR R5")
+                base_uri = info.get("base_uri", "http://hl7.org/fhir/")
+                desc_prefix = "HL7 FHIR R5 – "
             else:
                 ont_name = info.get("name", "IOF")
                 base_uri = info.get(

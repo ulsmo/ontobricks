@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 from back.core.industry.fibo.FiboImportService import FiboImportService
 from back.core.industry.cdisc.CdiscImportService import CdiscImportService
 from back.core.industry.iof.IofImportService import IofImportService
+from back.core.industry.fhir.FhirImportService import FhirImportService
 
 
 class TestFiboImportService:
@@ -211,3 +212,196 @@ class TestIofImportService:
         )
         assert content is not None
         assert error is None
+
+
+class TestFhirImportService:
+    def test_catalog_returns_all_domains(self):
+        catalog = FhirImportService.get_fhir_catalog()
+        assert isinstance(catalog, list)
+        assert len(catalog) == len(FhirImportService.FHIR_DOMAINS)
+
+    def test_catalog_entry_fields(self):
+        catalog = FhirImportService.get_fhir_catalog()
+        for entry in catalog:
+            assert "key" in entry
+            assert "name" in entry
+            assert "description" in entry
+            assert "icon" in entry
+            assert "required" in entry
+            assert "module_count" in entry
+
+    def test_foundation_marked_required(self):
+        catalog = FhirImportService.get_fhir_catalog()
+        foundation = next(c for c in catalog if c["key"] == "FOUNDATION")
+        assert foundation["required"] is True
+
+    def test_other_domains_not_required(self):
+        catalog = FhirImportService.get_fhir_catalog()
+        for entry in catalog:
+            if entry["key"] != "FOUNDATION":
+                assert entry["required"] is False
+
+    def test_build_allowed_resources_auto_includes_foundation(self):
+        allowed = FhirImportService._build_allowed_resources(["CLINICAL"])
+        # FOUNDATION resources must be present
+        assert "Resource" in allowed
+        assert "DomainResource" in allowed
+        # CLINICAL resources must be present
+        assert "Patient" in allowed
+        assert "Encounter" in allowed
+
+    def test_build_allowed_resources_foundation_only(self):
+        allowed = FhirImportService._build_allowed_resources(["FOUNDATION"])
+        assert "Resource" in allowed
+        assert "Bundle" in allowed
+        # CLINICAL resources should NOT be included
+        assert "Patient" not in allowed
+
+    def test_transform_resource_not_self_referencing(self):
+        """fhir:Resource has rdfs:subClassOf fhir:Base — must not set parent='Resource' on itself."""
+        from rdflib import Graph, RDF, OWL, RDFS, URIRef, Literal
+
+        graph = Graph()
+        fhir_ns = "http://hl7.org/fhir/"
+
+        resource_uri = URIRef(f"{fhir_ns}Resource")
+        base_uri = URIRef(f"{fhir_ns}Base")
+        graph.add((resource_uri, RDF.type, OWL.Class))
+        graph.add((resource_uri, RDFS.label, Literal("Resource")))
+        graph.add((resource_uri, RDFS.subClassOf, base_uri))  # Resource → Base
+
+        result = FhirImportService._transform_fhir_to_ontobricks(graph, ["FOUNDATION"])
+        resource_cls = next((c for c in result["classes"] if c["name"] == "Resource"), None)
+        assert resource_cls is not None, "Resource class not found"
+        assert resource_cls["parent"] != "Resource", "Resource must not be its own parent"
+
+    def test_transform_base_is_tree_root(self):
+        """Base (the true FHIR root) must have an empty parent so it appears as a root node."""
+        from rdflib import Graph
+
+        result = FhirImportService._transform_fhir_to_ontobricks(Graph(), ["FOUNDATION"])
+        base_cls = next((c for c in result["classes"] if c["name"] == "Base"), None)
+        assert base_cls is not None, "Base class not found"
+        assert base_cls["parent"] == "", f"Base parent must be empty, got '{base_cls['parent']}'"
+
+    def test_build_allowed_resources_always_includes_complex_types(self):
+        # Complex types must always be present so property ranges resolve in the frontend
+        allowed = FhirImportService._build_allowed_resources(["FOUNDATION"])
+        assert "Address" in allowed
+        assert "CodeableConcept" in allowed
+        assert "Reference" in allowed
+        assert "HumanName" in allowed
+        assert "Identifier" in allowed
+        assert "CodeableReference" in allowed
+
+    def test_build_allowed_resources_deduplication(self):
+        # Calling with FOUNDATION twice should not duplicate
+        allowed1 = FhirImportService._build_allowed_resources(["FOUNDATION"])
+        allowed2 = FhirImportService._build_allowed_resources(["FOUNDATION", "FOUNDATION"])
+        assert allowed1 == allowed2
+
+    def test_transform_returns_classes_and_properties(self):
+        """Minimal smoke test: empty graph always returns base types."""
+        from rdflib import Graph
+        result = FhirImportService._transform_fhir_to_ontobricks(Graph(), ["FOUNDATION"])
+        assert "classes" in result
+        assert "properties" in result
+        assert "ontology_info" in result
+        assert "stats" in result
+        # Base types always injected even when not in the parsed graph
+        root_names = [c["name"] for c in result["classes"]]
+        assert "Resource" in root_names
+        assert "DomainResource" in root_names
+
+    def test_transform_uses_domain_filter(self):
+        """Classes outside the selected domain are not returned."""
+        from rdflib import Graph, RDF, OWL, RDFS, URIRef, Literal
+
+        graph = Graph()
+        fhir_ns = "http://hl7.org/fhir/"
+
+        # Add a Patient class (CLINICAL) and a Claim class (FINANCIAL)
+        patient_uri = URIRef(f"{fhir_ns}Patient")
+        claim_uri = URIRef(f"{fhir_ns}Claim")
+
+        for uri in (patient_uri, claim_uri):
+            graph.add((uri, RDF.type, OWL.Class))
+            graph.add((uri, RDFS.label, Literal(uri.split("/")[-1])))
+
+        # Select only CLINICAL — Claim (FINANCIAL) must be absent
+        result = FhirImportService._transform_fhir_to_ontobricks(graph, ["CLINICAL"])
+        class_names = {c["name"] for c in result["classes"]}
+        assert "Patient" in class_names
+        assert "Resource" in class_names   # injected as base type
+        assert "Claim" not in class_names
+
+    def test_transform_extracts_data_properties_from_restrictions(self):
+        """Data properties from owl:Restriction blank nodes appear on the class."""
+        from rdflib import Graph, RDF, OWL, RDFS, URIRef, Literal, BNode
+
+        graph = Graph()
+        fhir_ns = "http://hl7.org/fhir/"
+
+        patient_uri = URIRef(f"{fhir_ns}Patient")
+        birthdate_prop = URIRef(f"{fhir_ns}birthDate")
+        date_type = URIRef(f"{fhir_ns}date")
+
+        graph.add((patient_uri, RDF.type, OWL.Class))
+        graph.add((patient_uri, RDFS.label, Literal("Patient")))
+
+        graph.add((birthdate_prop, RDF.type, OWL.ObjectProperty))
+        graph.add((birthdate_prop, RDFS.label, Literal("birthDate")))
+
+        # rdfs:subClassOf [ a owl:Restriction ; owl:onProperty fhir:birthDate ;
+        #                    owl:allValuesFrom fhir:date ]
+        restriction = BNode()
+        graph.add((restriction, RDF.type, OWL.Restriction))
+        graph.add((restriction, OWL.onProperty, birthdate_prop))
+        graph.add((restriction, OWL.allValuesFrom, date_type))
+        graph.add((patient_uri, RDFS.subClassOf, restriction))
+
+        result = FhirImportService._transform_fhir_to_ontobricks(graph, ["CLINICAL"])
+        patient_cls = next(c for c in result["classes"] if c["name"] == "Patient")
+        dp_names = [dp["name"] for dp in patient_cls["dataProperties"]]
+        assert "birthDate" in dp_names
+
+    @patch("requests.get")
+    def test_fetch_fhir_ttl_success(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"@prefix fhir: <http://hl7.org/fhir/> ."
+        mock_resp.text = "@prefix fhir: <http://hl7.org/fhir/> ."
+        mock_get.return_value = mock_resp
+
+        content = FhirImportService._fetch_fhir_ttl()
+        assert "@prefix fhir:" in content
+
+    @patch("requests.get")
+    def test_fetch_fhir_ttl_html_rejected(self, mock_get):
+        from back.core.errors import InfrastructureError
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b"<!DOCTYPE html>"
+        mock_resp.text = "<!DOCTYPE html><html>Error</html>"
+        mock_get.return_value = mock_resp
+
+        with pytest.raises(InfrastructureError):
+            FhirImportService._fetch_fhir_ttl()
+
+    @patch("requests.get")
+    def test_fetch_fhir_ttl_http_error(self, mock_get):
+        from back.core.errors import InfrastructureError
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 503
+        mock_get.return_value = mock_resp
+
+        with pytest.raises(InfrastructureError):
+            FhirImportService._fetch_fhir_ttl()
+
+    def test_fetch_and_parse_empty_domains_raises(self):
+        from back.core.errors import ValidationError
+
+        with pytest.raises(ValidationError):
+            FhirImportService.fetch_and_parse_fhir([])

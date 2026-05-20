@@ -1,10 +1,10 @@
 /**
  * OntoBricks - ontology-import.js
- * Import section for the Ontology page - OWL, RDFS, FIBO, CDISC, IOF
+ * Import section for the Ontology page - OWL, RDFS, FIBO, CDISC, IOF, FHIR
  */
 
-// IMPORT SECTION - Import OWL, RDFS, FIBO, CDISC, IOF
-// =====================================================
+// IMPORT SECTION - Import OWL, RDFS, FIBO, CDISC, IOF, FHIR
+// ===========================================================
 
 // --- OWL Import ---
 document.getElementById('importOwlLocalBtn').addEventListener('click', function() {
@@ -139,11 +139,15 @@ document.getElementById('importFiboBtn').addEventListener('click', async functio
     });
 
     if (domains.length === 1) {
-        // Only FND selected – still valid but ask if intentional
-        const proceed = confirm(
-            'Only Foundations (FND) is selected. This imports core concepts only.\n\n' +
-            'Select additional domains (BE, FBC, etc.) for a richer ontology.\n\nProceed with FND only?'
-        );
+        const proceed = await showConfirmDialog({
+            title: 'Import Foundations only?',
+            message: 'Only <strong>Foundations (FND)</strong> is selected. This imports core concepts only.<br><br>' +
+                     'Select additional domains (BE, FBC, etc.) for a richer ontology.',
+            confirmText: 'Proceed with FND only',
+            cancelText: 'Cancel',
+            confirmClass: 'btn-primary',
+            icon: 'info-circle'
+        });
         if (!proceed) return;
     }
 
@@ -218,11 +222,15 @@ document.getElementById('importCdiscBtn').addEventListener('click', async functi
     });
 
     if (domains.length === 1) {
-        // Only SCHEMAS selected – still valid but ask if intentional
-        const proceed = confirm(
-            'Only Schemas are selected. This imports the meta-model only.\n\n' +
-            'Select additional standards (SDTM, CDASH, etc.) for a richer ontology.\n\nProceed with Schemas only?'
-        );
+        const proceed = await showConfirmDialog({
+            title: 'Import Schemas only?',
+            message: 'Only <strong>Schemas</strong> is selected. This imports the meta-model only.<br><br>' +
+                     'Select additional standards (SDTM, CDASH, etc.) for a richer ontology.',
+            confirmText: 'Proceed with Schemas only',
+            cancelText: 'Cancel',
+            confirmClass: 'btn-primary',
+            icon: 'info-circle'
+        });
         if (!proceed) return;
     }
 
@@ -278,6 +286,75 @@ document.getElementById('importCdiscBtn').addEventListener('click', async functi
     }
 });
 
+// --- FHIR Import ---
+document.getElementById('importFhirBtn').addEventListener('click', async function() {
+    // Collect selected domains (FOUNDATION is always included)
+    const domains = ['FOUNDATION'];
+    document.querySelectorAll('.fhir-domain-cb:checked').forEach(function(cb) {
+        if (!domains.includes(cb.value)) {
+            domains.push(cb.value);
+        }
+    });
+
+    if (domains.length === 1) {
+        const proceed = await showConfirmDialog({
+            title: 'Import Foundation only?',
+            message: 'Only <strong>Foundation</strong> is selected. This imports base FHIR resource types only.<br><br>' +
+                     'Select additional domains (Clinical, Diagnostics, etc.) for a richer ontology.',
+            confirmText: 'Proceed with Foundation only',
+            cancelText: 'Cancel',
+            confirmClass: 'btn-primary',
+            icon: 'info-circle'
+        });
+        if (!proceed) return;
+    }
+
+    const btn = document.getElementById('importFhirBtn');
+    const progress = document.getElementById('fhirImportProgress');
+    const statusEl = document.getElementById('fhirImportStatus');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Importing...';
+    progress.classList.remove('d-none');
+    statusEl.textContent = 'Fetching FHIR R5 ontology from hl7.org... This may take 20-40 seconds.';
+
+    try {
+        const response = await fetch('/ontology/import-fhir', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ domains: domains }),
+            credentials: 'same-origin'
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            const stats = result.stats || {};
+            showNotification(
+                'FHIR imported: ' + (stats.classes || 0) + ' classes, ' +
+                (stats.properties || 0) + ' properties',
+                'success'
+            );
+            statusEl.textContent = 'Import complete!';
+
+            if (typeof loadOntologyFromSession === 'function') {
+                await loadOntologyFromSession();
+            }
+            if (typeof refreshOntologyStatus === 'function') refreshOntologyStatus();
+        } else {
+            showNotification('FHIR import failed: ' + result.message, 'error');
+            statusEl.textContent = 'Import failed.';
+        }
+    } catch (error) {
+        showNotification('FHIR import error: ' + error.message, 'error');
+        statusEl.textContent = 'Import error.';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download"></i> Import Selected Domains';
+        setTimeout(function() { progress.classList.add('d-none'); }, 3000);
+    }
+});
+
 // --- IOF Import ---
 document.getElementById('importIofBtn').addEventListener('click', async function() {
     // Collect selected domains (CORE is always included)
@@ -289,10 +366,15 @@ document.getElementById('importIofBtn').addEventListener('click', async function
     });
 
     if (domains.length === 1) {
-        const proceed = confirm(
-            'Only Core is selected. This imports foundational manufacturing concepts only.\n\n' +
-            'Select additional domains (Maintenance, Supply Chain) for a richer ontology.\n\nProceed with Core only?'
-        );
+        const proceed = await showConfirmDialog({
+            title: 'Import Core only?',
+            message: 'Only <strong>Core</strong> is selected. This imports foundational manufacturing concepts only.<br><br>' +
+                     'Select additional domains (Maintenance, Supply Chain) for a richer ontology.',
+            confirmText: 'Proceed with Core only',
+            cancelText: 'Cancel',
+            confirmClass: 'btn-primary',
+            icon: 'info-circle'
+        });
         if (!proceed) return;
     }
 

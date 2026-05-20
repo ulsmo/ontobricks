@@ -76,6 +76,10 @@ let sharedPanelDashboardParams = {};  // Dashboard parameter mappings { paramNam
 let sharedPanelBridges = [];  // Cross-domain entity bridges
 let sharedPanelDirty = false;
 
+// Remembered active tab per panel type — persists across entity/relationship selections
+let _entityPanelActiveTab = 'details';
+let _relPanelActiveTab = 'details';
+
 // Panel resize state
 let isResizing = false;
 let panelStartWidth = 380;
@@ -186,6 +190,8 @@ function setupPanelListeners(section) {
 
 /**
  * Switch between form tabs inside the panel body.
+ * Persists the selection so the same tab is restored when another
+ * entity or relationship is opened.
  */
 function switchFormTab(tabLink) {
     const form = tabLink.closest('form') || tabLink.closest('.panel-body');
@@ -198,6 +204,12 @@ function switchFormTab(tabLink) {
     form.querySelectorAll('.form-tab-pane').forEach(pane => {
         pane.classList.toggle('active', pane.dataset.formTabContent === tabName);
     });
+
+    if (form.id === 'sharedEntityForm') {
+        _entityPanelActiveTab = tabName;
+    } else if (form.id === 'sharedRelationshipForm') {
+        _relPanelActiveTab = tabName;
+    }
 }
 
 /**
@@ -576,17 +588,18 @@ async function renderEntityForm(panel, cls, viewOnly = false) {
         console.warn('[SharedPanel] Could not load groups:', e);
     }
     
+    const _eTab = _entityPanelActiveTab || 'details';
     body.innerHTML = `
         <div id="sharedEntityAssignmentLink"></div>
         <form id="sharedEntityForm">
             <ul class="form-tabs-nav">
-                <li><a class="form-tab-link active" data-form-tab="details" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-info-circle me-1"></i>Details</a></li>
-                <li><a class="form-tab-link" data-form-tab="attributes" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-tags me-1"></i>Attributes</a></li>
-                <li><a class="form-tab-link" data-form-tab="actions" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-lightning me-1"></i>Actions</a></li>
-                <li><a class="form-tab-link" data-form-tab="constraints" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-sliders me-1"></i>Constraints</a></li>
+                <li><a class="form-tab-link ${_eTab === 'details' ? 'active' : ''}" data-form-tab="details" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-info-circle me-1"></i>Details</a></li>
+                <li><a class="form-tab-link ${_eTab === 'attributes' ? 'active' : ''}" data-form-tab="attributes" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-tags me-1"></i>Attributes</a></li>
+                <li><a class="form-tab-link ${_eTab === 'actions' ? 'active' : ''}" data-form-tab="actions" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-lightning me-1"></i>Actions</a></li>
+                <li><a class="form-tab-link ${_eTab === 'constraints' ? 'active' : ''}" data-form-tab="constraints" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-sliders me-1"></i>Constraints</a></li>
             </ul>
 
-            <div class="form-tab-pane active" data-form-tab-content="details">
+            <div class="form-tab-pane ${_eTab === 'details' ? 'active' : ''}" data-form-tab-content="details">
                 <div class="mb-3 p-2 bg-light rounded border">
                     <label for="sharedEntityParent" class="form-label"><i class="bi bi-diagram-2"></i> Inherits From</label>
                     <select class="form-select form-select-sm" id="sharedEntityParent" ${disabled} onchange="onSharedEntityParentChange()">
@@ -626,7 +639,7 @@ async function renderEntityForm(panel, cls, viewOnly = false) {
                 </div>
             </div>
 
-            <div class="form-tab-pane" data-form-tab-content="attributes">
+            <div class="form-tab-pane ${_eTab === 'attributes' ? 'active' : ''}" data-form-tab-content="attributes">
                 <div class="d-flex justify-content-end gap-1 mb-2">
                     ${!viewOnly ? `
                         <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="openMetadataAttributePicker()" title="Add from data sources"><i class="bi bi-database"></i></button>
@@ -636,7 +649,7 @@ async function renderEntityForm(panel, cls, viewOnly = false) {
                 <div id="sharedEntityAttributes" class="border rounded p-2" style="background: #f8f9fa; overflow-y: auto;"></div>
             </div>
 
-            <div class="form-tab-pane" data-form-tab-content="actions">
+            <div class="form-tab-pane ${_eTab === 'actions' ? 'active' : ''}" data-form-tab-content="actions">
                 <div class="mb-3">
                     <label class="form-label d-flex justify-content-between align-items-center">
                         <span><i class="bi bi-speedometer2 me-1"></i>Dashboard</span>
@@ -661,7 +674,7 @@ async function renderEntityForm(panel, cls, viewOnly = false) {
                 </div>
             </div>
 
-            <div class="form-tab-pane" data-form-tab-content="constraints">
+            <div class="form-tab-pane ${_eTab === 'constraints' ? 'active' : ''}" data-form-tab-content="constraints">
                 <div class="mb-3">
                     <label class="form-label small text-muted mb-1" title="Classes that share no instances with this class">
                         <i class="bi bi-x-circle me-1"></i>Disjoint With
@@ -1826,15 +1839,17 @@ async function renderRelationshipForm(panel, prop, viewOnly = false) {
         }
     }
     
+    const _relTabValid = ['details', 'constraints'];
+    const _rTab = _relTabValid.includes(_relPanelActiveTab) ? _relPanelActiveTab : 'details';
     body.innerHTML = `
         <div id="sharedRelAssignmentLink"></div>
         <form id="sharedRelationshipForm">
             <ul class="form-tabs-nav">
-                <li><a class="form-tab-link active" data-form-tab="details" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-info-circle me-1"></i>Details</a></li>
-                <li><a class="form-tab-link" data-form-tab="constraints" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-sliders me-1"></i>Constraints</a></li>
+                <li><a class="form-tab-link ${_rTab === 'details' ? 'active' : ''}" data-form-tab="details" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-info-circle me-1"></i>Details</a></li>
+                <li><a class="form-tab-link ${_rTab === 'constraints' ? 'active' : ''}" data-form-tab="constraints" href="#" onclick="event.preventDefault(); switchFormTab(this)"><i class="bi bi-sliders me-1"></i>Constraints</a></li>
             </ul>
 
-            <div class="form-tab-pane active" data-form-tab-content="details">
+            <div class="form-tab-pane ${_rTab === 'details' ? 'active' : ''}" data-form-tab-content="details">
                 <div class="mb-3">
                     <label for="sharedRelName" class="form-label">Name <span class="text-danger">*</span></label>
                     <input type="text" class="form-control form-control-sm" id="sharedRelName" value="${prop?.name || ''}" ${disabled} required>
@@ -1868,7 +1883,7 @@ async function renderRelationshipForm(panel, prop, viewOnly = false) {
                 </div>
             </div>
 
-            <div class="form-tab-pane" data-form-tab-content="constraints">
+            <div class="form-tab-pane ${_rTab === 'constraints' ? 'active' : ''}" data-form-tab-content="constraints">
                 <div class="mb-3">
                     <label class="form-label small text-muted mb-1">Cardinality</label>
                     <div class="row g-2">
