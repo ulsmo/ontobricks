@@ -156,12 +156,19 @@ def tool_list_entity_types(ctx: ToolContext, **_kwargs) -> str:
     lines: list[str] = []
     lines.append(f"Knowledge Graph -- {ctx.dtwin_domain_name}")
     lines.append("=" * 40)
+    inferred = data.get("inferred_triples", 0)
     lines.append(f"Total triples:       {data.get('total_triples', 0):,}")
     lines.append(f"Distinct entities:   {data.get('distinct_subjects', 0):,}")
     lines.append(f"Distinct predicates: {data.get('distinct_predicates', 0):,}")
     lines.append(f"Labels:              {data.get('label_count', 0):,}")
     lines.append(f"Type assertions:     {data.get('type_assertion_count', 0):,}")
     lines.append(f"Relationships:       {data.get('relationship_count', 0):,}")
+    if inferred > 0:
+        lines.append(
+            f"Inferred triples:    {inferred:,}  "
+            f"[reasoning output — use describe_entity to query them; "
+            f"query_graphql may miss predicates not in the schema]"
+        )
     lines.append("")
 
     onto_labels = _get_ontology_labels(ctx)
@@ -520,7 +527,10 @@ TOOL_DEFINITIONS: List[dict] = [
     _GET_STATUS_DEF,
     _GET_GRAPHQL_SCHEMA_DEF,
     _QUERY_GRAPHQL_DEF,
-    _RUN_SPARQL_DEF,
+    # run_sparql intentionally excluded: it queries the warehouse Delta view and
+    # cannot see inferred/reasoning triples.  Use describe_entity (raw triple
+    # store, union view) or query_graphql (schema-filtered, same union view) so
+    # Graph Chat always operates on the full graph including materialised data.
 ]
 
 TOOL_HANDLERS: Dict[str, Callable] = {
@@ -529,5 +539,4 @@ TOOL_HANDLERS: Dict[str, Callable] = {
     "get_status": tool_get_status,
     "get_graphql_schema": tool_get_graphql_schema,
     "query_graphql": tool_query_graphql,
-    "run_sparql": tool_run_sparql,
 }

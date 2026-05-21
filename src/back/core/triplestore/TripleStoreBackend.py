@@ -120,6 +120,16 @@ class TripleStoreBackend(ABC):
         """Stable identifier for translators (SWRL, SPARQL, aggregate/DT SQL)."""
         return self._sql_relation(graph_name)
 
+    def get_inferred_triple_count(self, table_name: str) -> int:
+        """Return the count of inferred/app-written triples for *table_name*.
+
+        Backends that separate bulk-synced data from reasoning output
+        (e.g. :class:`LakebaseFlatStore`) override this to query only the
+        writable companion table.  The default returns 0 (no distinction
+        between synced and inferred triples in this backend).
+        """
+        return 0
+
     def get_aggregate_stats(self, table_name: str) -> Dict[str, int]:
         """Return aggregate triple-store statistics in a single query.
 

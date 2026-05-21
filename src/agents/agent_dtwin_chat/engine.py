@@ -83,12 +83,6 @@ TOOLS
       Use only for bulk typed look-ups (e.g. "all Customers with their
       Orders") where you already know the schema covers the data you need.
 
-  - run_sparql(query, limit?)
-      Translates SPARQL to SQL over the WAREHOUSE MAPPING VIEWS — NOT the
-      graph store. Does NOT include triples added by inference or
-      materialisation. Use only for aggregations (COUNT, GROUP BY) or
-      cross-type joins over warehouse data.
-
 WORKFLOW
   1. If you are unsure what the graph contains, call ``list_entity_types``
      to see entity types and their counts.
@@ -101,8 +95,8 @@ WORKFLOW
      Use depth=2 only when the user explicitly asks for indirect or extended
      relationships (e.g. "related through claims", "all connected entities").
   3. After ``describe_entity`` confirms what relationships exist, you may use
-     ``query_graphql`` for bulk typed look-ups or ``run_sparql`` for
-     aggregations, but treat ``describe_entity`` as the authoritative source.
+     ``query_graphql`` for bulk typed look-ups, but treat ``describe_entity``
+     as the authoritative source.
   4. Reply with a concise, well-formatted answer. Never invent URIs or counts.
 
 RULES

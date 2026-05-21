@@ -611,7 +611,7 @@ def create_mcp_server(mode: str = "standalone") -> FastMCP:
         "OntoBricks",
         instructions=(
             "You are connected to OntoBricks: domain registry + Digital Twin "
-            "(triple store) over external REST at /api/v1.\n"
+            "(triple store) over external REST at /api/v1.\n\n"
             "Workflow:\n"
             "1. Call 'list_domains' to see available domains.\n"
             "2. Optionally call 'list_domain_versions' or 'get_design_status' "
@@ -620,8 +620,25 @@ def create_mcp_server(mode: str = "standalone") -> FastMCP:
             "the user's question.\n"
             "4. Use 'list_entity_types' and 'describe_entity' for exploration, "
             "or GraphQL tools for typed queries.\n\n"
-            "**GraphQL** (after select_domain): 'get_graphql_schema', then "
-            "'query_graphql' for nested relationships.\n\n"
+            "DATA SOURCES — three tools, three different scopes:\n"
+            "- 'describe_entity': GROUND TRUTH. Queries the raw triple store "
+            "(union of synced data AND inferred/materialised triples). Returns "
+            "ALL relationships including those added by reasoning, regardless of "
+            "whether their predicate is declared in the ontology schema. "
+            "Use this as the PRIMARY tool whenever you need to know what "
+            "relationships or attributes an entity has, especially after inference "
+            "has been run.\n"
+            "- 'query_graphql': Reads the SAME graph store but filtered through "
+            "the ontology schema layer. Only predicates declared in the ontology "
+            "appear as fields. Inferred/materialised triples whose predicate is "
+            "NOT in the ontology schema are silently invisible. Use only for "
+            "bulk typed look-ups where you already know the schema covers the data.\n"
+            "- 'list_entity_types': Aggregate stats over the full graph store "
+            "(union view) — reflects both synced and inferred entity counts.\n\n"
+            "DECISION RULE: For any question about a specific entity or its "
+            "relationships, always start with 'describe_entity'. Only fall back "
+            "to 'query_graphql' for bulk/typed queries after confirming the schema "
+            "covers the predicates you need.\n\n"
             "Always select a domain before entity/triple/GraphQL queries. "
             "If the user's question maps clearly to one domain, select it automatically."
         ),
@@ -836,12 +853,19 @@ def create_mcp_server(mode: str = "standalone") -> FastMCP:
         lines: list[str] = []
         lines.append(f"Knowledge Graph — {_selected_domain['name']}")
         lines.append("=" * 40)
+        inferred = data.get("inferred_triples", 0)
         lines.append(f"Total triples:       {data.get('total_triples', 0):,}")
         lines.append(f"Distinct entities:   {data.get('distinct_subjects', 0):,}")
         lines.append(f"Distinct predicates: {data.get('distinct_predicates', 0):,}")
         lines.append(f"Labels:              {data.get('label_count', 0):,}")
         lines.append(f"Type assertions:     {data.get('type_assertion_count', 0):,}")
         lines.append(f"Relationships:       {data.get('relationship_count', 0):,}")
+        if inferred > 0:
+            lines.append(
+                f"Inferred triples:    {inferred:,}  "
+                f"[reasoning output — ONLY visible via describe_entity, "
+                f"NOT via query_graphql]"
+            )
         lines.append("")
 
         entity_types = data.get("entity_types", [])
@@ -876,14 +900,24 @@ def create_mcp_server(mode: str = "standalone") -> FastMCP:
     ) -> str:
         """Search for an entity and return a full-text description.
 
+        Queries the RAW TRIPLE STORE (union of synced data AND
+        inferred/materialised triples added by reasoning). This is the
+        GROUND TRUTH tool — it returns ALL triples regardless of the
+        ontology schema, including relationships added by inference that
+        are not declared as ontology predicates.
+
         Finds entities matching the search text and/or type in the
         selected domain's knowledge graph, then traverses their
         relationships hop-by-hop and returns a human-readable description
         including:
           - Entity identity (name, type, URI)
           - All attributes (e.g. email, phone, city …)
-          - All relationships to other entities
+          - All relationships to other entities, including inferred ones
           - Related entities discovered at each traversal depth
+
+        Use this as the PRIMARY tool for any question about a specific
+        entity. Do NOT rely on ``query_graphql`` alone — it may miss
+        inferred/materialised relationships.
 
         A domain must be selected first via ``select_domain``.
         At least one of ``search`` or ``entity_type`` must be provided.
@@ -1014,11 +1048,19 @@ def create_mcp_server(mode: str = "standalone") -> FastMCP:
     ) -> str:
         """Execute a GraphQL query against the selected domain's knowledge graph.
 
+        Reads the graph store through the ONTOLOGY SCHEMA layer.
+        WARNING: only predicates declared in the ontology appear as
+        GraphQL fields. Inferred/materialised triples whose predicate is
+        NOT in the ontology schema are silently invisible here.
+        Use ``describe_entity`` when you need to see ALL relationships
+        including inferred ones.
+
         The schema is auto-generated from the domain's ontology.
         Call ``get_graphql_schema`` first to discover available types
         and fields.
 
         This tool is ideal for:
+          - Bulk typed look-ups where the schema covers the data you need
           - Fetching specific fields (no over-fetching)
           - Nested relationship traversal in a single request
           - Filtering and pagination (``limit``, ``offset``, ``search``)

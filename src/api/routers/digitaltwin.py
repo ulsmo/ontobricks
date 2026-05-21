@@ -82,6 +82,7 @@ class StatsResponse(BaseModel):
     label_count: int = 0
     type_assertion_count: int = 0
     relationship_count: int = 0
+    inferred_triples: int = 0
     message: Optional[str] = None
 
 
@@ -396,6 +397,7 @@ async def dt_stats(
         pred_rows = store.get_predicate_distribution(graph_name)
 
         rel_cnt = max(total - type_cnt - lbl, 0)
+        inferred_cnt = store.get_inferred_triple_count(graph_name)
 
         return StatsResponse(
             success=True,
@@ -413,6 +415,7 @@ async def dt_stats(
             label_count=lbl,
             type_assertion_count=type_cnt,
             relationship_count=rel_cnt,
+            inferred_triples=inferred_cnt,
         )
     except Exception as e:
         logger.exception("dt_stats failed: %s", e)

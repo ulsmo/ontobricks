@@ -956,6 +956,8 @@ async def triplestore_stats(
         type_count = sum(int(r.get("cnt", 0)) for r in entity_types)
         relationship_count = total_count - type_count - label_count
 
+        inferred_count = store.get_inferred_triple_count(graph_name)
+
         classified = DigitalTwin(domain).classify_predicates(top_predicates)
 
         result = {
@@ -970,6 +972,7 @@ async def triplestore_stats(
             "label_count": label_count,
             "type_assertion_count": type_count,
             "relationship_count": max(relationship_count, 0),
+            "inferred_triples": inferred_count,
         }
         DigitalTwin(domain).set_ts_cache("stats", result)
         return result

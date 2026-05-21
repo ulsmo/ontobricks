@@ -135,6 +135,19 @@ class LakebaseFlatStore(LakebaseBase):
         """Return the ``_sync`` table name so callers can query without materialised triples."""
         return _companion_ddl.synced_phy(table_name)
 
+    def get_inferred_triple_count(self, table_name: str) -> int:
+        """Return the count of triples in the companion (reasoning / app-written) table.
+
+        Queries ``*__app`` directly so callers can determine whether any
+        inferred data exists independently of the union view total.
+        Returns 0 on any error (e.g. companion table not yet created).
+        """
+        companion = _companion_ddl.companion_phy(table_name)
+        try:
+            return self.count_triples(companion)
+        except Exception:
+            return 0
+
     def synced_phy(self, name: str) -> str:
         """Postgres table name for the read-only synced side (managed_synced only)."""
         return _companion_ddl.synced_phy(name)
