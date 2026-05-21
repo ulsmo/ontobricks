@@ -1,10 +1,14 @@
 """Tests for back.objects.registry.PermissionService — permission service."""
 
+import importlib
 import json
 import time
 from unittest.mock import patch
 
 import pytest
+
+# Work around __init__.py re-export shadowing the module path.
+_PS_MOD = importlib.import_module("back.objects.registry.PermissionService")
 
 from back.objects.registry.PermissionService import (
     PermissionService,
@@ -213,16 +217,10 @@ class TestPrincipalsCache:
                     {"display_name": "everyone"},
                 ]
 
-        with patch(
-            "back.objects.registry.PermissionService.DatabricksClient",
-            return_value=_AppFakeClient(),
-        ):
+        with patch.object(_PS_MOD, "DatabricksClient", return_value=_AppFakeClient()):
             app = svc.list_app_principals("h", "t", "ontobricks")
 
-        with patch(
-            "back.objects.registry.PermissionService.DatabricksClient",
-            return_value=_DirFakeClient(),
-        ):
+        with patch.object(_PS_MOD, "DatabricksClient", return_value=_DirFakeClient()):
             ws_users = svc.list_users("h", "t")
             ws_groups = svc.list_groups("h", "t")
 
@@ -236,8 +234,9 @@ class TestPrincipalsCache:
 
         # A second call to list_app_principals must come from the
         # app-scoped cache and still report the small set.
-        with patch(
-            "back.objects.registry.PermissionService.DatabricksClient",
+        with patch.object(
+            _PS_MOD,
+            "DatabricksClient",
             side_effect=AssertionError("should hit cache, not the API"),
         ):
             app_again = svc.list_app_principals("h", "t", "ontobricks")
@@ -641,37 +640,25 @@ class TestAppPrincipalsBootstrap:
 
     def test_success_clears_bootstrap_flag(self, svc):
         fake = self._FakeClient([{"email": "a@b.com"}], [], 200)
-        with patch(
-            "back.objects.registry.PermissionService.DatabricksClient",
-            return_value=fake,
-        ):
+        with patch.object(_PS_MOD, "DatabricksClient", return_value=fake):
             svc.list_app_principals("h", "t", "ontobricks")
         assert svc.is_app_principals_forbidden() is False
 
     def test_403_sets_bootstrap_flag(self, svc):
         fake = self._FakeClient([], [], 403)
-        with patch(
-            "back.objects.registry.PermissionService.DatabricksClient",
-            return_value=fake,
-        ):
+        with patch.object(_PS_MOD, "DatabricksClient", return_value=fake):
             svc.list_app_principals("h", "t", "ontobricks")
         assert svc.is_app_principals_forbidden() is True
 
     def test_non_403_errors_do_not_set_flag(self, svc):
         fake = self._FakeClient([], [], 500)
-        with patch(
-            "back.objects.registry.PermissionService.DatabricksClient",
-            return_value=fake,
-        ):
+        with patch.object(_PS_MOD, "DatabricksClient", return_value=fake):
             svc.list_app_principals("h", "t", "ontobricks")
         assert svc.is_app_principals_forbidden() is False
 
     def test_clear_cache_resets_flag(self, svc):
         fake = self._FakeClient([], [], 403)
-        with patch(
-            "back.objects.registry.PermissionService.DatabricksClient",
-            return_value=fake,
-        ):
+        with patch.object(_PS_MOD, "DatabricksClient", return_value=fake):
             svc.list_app_principals("h", "t", "ontobricks")
         assert svc.is_app_principals_forbidden() is True
         svc.clear_principals_cache()

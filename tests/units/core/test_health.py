@@ -6,6 +6,7 @@ environment, including CI machines with no Databricks credentials.
 end-to-end against the real (degraded) test environment.
 """
 
+import importlib
 import os
 import shutil
 from types import SimpleNamespace
@@ -14,6 +15,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.fastapi import health
+
+# These imports work around __init__.py re-exports that shadow module paths.
+_VFS_MOD = importlib.import_module("back.core.databricks.VolumeFileService")
+_LBA_MOD = importlib.import_module("back.core.databricks.LakebaseAuth")
 
 
 # ---------------------------------------------------------------------------
@@ -182,10 +187,7 @@ class TestCheckRegistryCfg:
 
 class TestCheckRegistryVolumeReadWrite:
     def _patch_svc(self, svc):
-        return patch(
-            "back.core.databricks.VolumeFileService.VolumeFileService",
-            return_value=svc,
-        )
+        return patch.object(_VFS_MOD, "VolumeFileService", return_value=svc)
 
     def test_read_ok(self):
         svc = MagicMock()
@@ -292,10 +294,7 @@ class TestCheckRegistryUcSchemaDdl:
 class TestCheckLakebase:
     def test_skipped_when_pg_not_bound(self):
         auth = MagicMock(is_available=False)
-        with patch(
-            "back.core.databricks.LakebaseAuth.get_lakebase_auth",
-            return_value=auth,
-        ):
+        with patch.object(_LBA_MOD, "get_lakebase_auth", return_value=auth):
             status, detail = health._check_lakebase(MagicMock())
         assert status == "warning"
         assert "not bound" in detail
@@ -305,14 +304,12 @@ class TestCheckLakebase:
         auth = MagicMock(is_available=True)
         store = MagicMock(schema="ontobricks_registry")
         store.init_status.return_value = {"initialized": True, "reason": "ok"}
-        with patch(
-            "back.core.databricks.LakebaseAuth.get_lakebase_auth",
-            return_value=auth,
-        ), patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
-           patch(
-               "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
-               return_value=store,
-           ):
+        with patch.object(_LBA_MOD, "get_lakebase_auth", return_value=auth), \
+             patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
+             patch(
+                 "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
+                 return_value=store,
+             ):
             status, detail = health._check_lakebase(MagicMock())
         assert status == "ok"
 
@@ -324,14 +321,12 @@ class TestCheckLakebase:
             "reason": "no_usage",
             "error": "Role lacks USAGE on schema",
         }
-        with patch(
-            "back.core.databricks.LakebaseAuth.get_lakebase_auth",
-            return_value=auth,
-        ), patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
-           patch(
-               "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
-               return_value=store,
-           ):
+        with patch.object(_LBA_MOD, "get_lakebase_auth", return_value=auth), \
+             patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
+             patch(
+                 "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
+                 return_value=store,
+             ):
             status, detail = health._check_lakebase(MagicMock())
         assert status == "error"
         assert "USAGE" in detail
@@ -344,14 +339,12 @@ class TestCheckLakebase:
             "reason": "no_registries_table",
             "error": "schema has no registries table",
         }
-        with patch(
-            "back.core.databricks.LakebaseAuth.get_lakebase_auth",
-            return_value=auth,
-        ), patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
-           patch(
-               "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
-               return_value=store,
-           ):
+        with patch.object(_LBA_MOD, "get_lakebase_auth", return_value=auth), \
+             patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
+             patch(
+                 "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
+                 return_value=store,
+             ):
             status, _ = health._check_lakebase(MagicMock())
         assert status == "warning"
 
@@ -359,10 +352,7 @@ class TestCheckLakebase:
 class TestCheckLakebasePermissions:
     def test_skipped_when_pg_not_bound(self):
         auth = MagicMock(is_available=False)
-        with patch(
-            "back.core.databricks.LakebaseAuth.get_lakebase_auth",
-            return_value=auth,
-        ):
+        with patch.object(_LBA_MOD, "get_lakebase_auth", return_value=auth):
             status, detail = health._check_lakebase_permissions(MagicMock())
         assert status == "warning"
         assert "skipped" in detail.lower()
@@ -375,14 +365,12 @@ class TestCheckLakebasePermissions:
             "reason": "no_usage",
             "error": "Role lacks USAGE on schema",
         }
-        with patch(
-            "back.core.databricks.LakebaseAuth.get_lakebase_auth",
-            return_value=auth,
-        ), patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
-           patch(
-               "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
-               return_value=store,
-           ):
+        with patch.object(_LBA_MOD, "get_lakebase_auth", return_value=auth), \
+             patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
+             patch(
+                 "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
+                 return_value=store,
+             ):
             status, detail = health._check_lakebase_permissions(MagicMock())
         assert status == "error"
         assert "USAGE" in detail
@@ -424,14 +412,12 @@ class TestCheckLakebasePermissions:
 
         store._connect.return_value = _ConnCtx()
 
-        with patch(
-            "back.core.databricks.LakebaseAuth.get_lakebase_auth",
-            return_value=auth,
-        ), patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
-           patch(
-               "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
-               return_value=store,
-           ):
+        with patch.object(_LBA_MOD, "get_lakebase_auth", return_value=auth), \
+             patch.object(health, "_resolve_registry_cfg", return_value=_fake_cfg()), \
+             patch(
+                 "back.objects.registry.store.lakebase.store.LakebaseRegistryStore",
+                 return_value=store,
+             ):
             status, detail = health._check_lakebase_permissions(MagicMock())
         assert status == "ok"
         assert "permissions ok" in detail.lower()

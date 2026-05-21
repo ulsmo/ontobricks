@@ -10,6 +10,7 @@ psycopg / connection / permission failure degrades to ``False``.
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 from back.objects.domain.SettingsService import SettingsService
@@ -69,10 +70,11 @@ class TestLakebaseSchemaStatus:
             "scheduled_builds": 0,
             "scheduled_history": 0,
         }
-        with patch(
-            "back.objects.registry.store.RegistryFactory.lakebase",
-            return_value=store,
-        ):
+        with patch.dict(sys.modules, {"psycopg": MagicMock()}), \
+             patch(
+                 "back.objects.registry.store.RegistryFactory.lakebase",
+                 return_value=store,
+             ):
             assert SettingsService._lakebase_schema_status(_rcfg()) == {
                 "initialized": True,
                 "populated": False,
@@ -89,10 +91,11 @@ class TestLakebaseSchemaStatus:
             "scheduled_builds": 0,
             "scheduled_history": 0,
         }
-        with patch(
-            "back.objects.registry.store.RegistryFactory.lakebase",
-            return_value=store,
-        ):
+        with patch.dict(sys.modules, {"psycopg": MagicMock()}), \
+             patch(
+                 "back.objects.registry.store.RegistryFactory.lakebase",
+                 return_value=store,
+             ):
             assert SettingsService._lakebase_schema_status(_rcfg()) == {
                 "initialized": True,
                 "populated": True,
@@ -120,10 +123,11 @@ class TestLakebaseSchemaStatus:
         store = MagicMock()
         store.is_initialized.return_value = True
         store.table_row_counts.side_effect = RuntimeError("permission denied")
-        with patch(
-            "back.objects.registry.store.RegistryFactory.lakebase",
-            return_value=store,
-        ):
+        with patch.dict(sys.modules, {"psycopg": MagicMock()}), \
+             patch(
+                 "back.objects.registry.store.RegistryFactory.lakebase",
+                 return_value=store,
+             ):
             assert SettingsService._lakebase_schema_status(_rcfg()) == {
                 "initialized": True,
                 "populated": False,

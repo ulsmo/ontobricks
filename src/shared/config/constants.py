@@ -35,7 +35,7 @@ def _read_version() -> str:
 # =====================================================
 APP_NAME: str = "OntoBricks"
 APP_VERSION: str = _read_version()
-HTTP_USER_AGENT: str = f"{APP_NAME}/{APP_VERSION}"
+HTTP_USER_AGENT: str = "ontobricks"
 
 # =====================================================
 # Logging

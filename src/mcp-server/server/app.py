@@ -47,7 +47,7 @@ from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
-_USER_AGENT = "OntoBricks-MCP/1.0.0"
+_USER_AGENT = "ontobricks"
 
 # Cached M2M OAuth token (module-level to survive across _get_auth_headers calls)
 _oauth_cache: dict = {"token": "", "ts": 0.0}

@@ -724,6 +724,10 @@ class TestFromContext:
 # ==================================================================
 
 
+@pytest.mark.skipif(
+    not __import__("importlib.util", fromlist=["find_spec"]).find_spec("apscheduler"),
+    reason="apscheduler not installed",
+)
 class TestSchedulerResolveCredsLakebase:
     """At startup the scheduler restores jobs *before* the global
     config has been read, so the ``RegistryCfg`` it builds from
