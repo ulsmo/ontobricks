@@ -1,7 +1,7 @@
 # OntoBricks — Product Roadmap
 
 > **Version:** 0.3.x → beyond  
-> **Last updated:** 2026-05-13  
+> **Last updated:** 2026-05-22  
 > **Status:** Living document — updated after each release
 
 > **Disclaimer:** This roadmap represents the current product direction and planned investments as of the date above. It is provided for informational purposes only and is subject to change at any time without notice. The features, timelines, and priorities described here are aspirational and do not constitute a commitment, promise, or legal obligation to deliver any specific functionality by any specific date. Actual releases may differ materially from what is described here.
@@ -15,7 +15,7 @@ OntoBricks is the only Databricks-native knowledge graph builder that combines o
 The next phases of the roadmap focus on three strategic axes:
 
 1. **Lakebase as the primary triple store** — replacing the embedded graph engine with a fully-indexed, SPARQL-capable, transactional Postgres backend (v0.4.0, shipping Q2 2026).
-2. **SPARQL federation** — federate queries across multiple domain graphs in a single Lakebase instance (v0.5.0).
+2. **UX & workflow improvements** — improve day-to-day usability across Graph Chat, Mapping, Ontology, and Scheduler based on direct user feedback (v0.5.0).
 3. **Neo4j connector** — extend the pluggable graph engine to the industry's leading native graph database, opening OntoBricks to hybrid Lakehouse + graph deployments (v0.6.0).
 
 ---
@@ -53,9 +53,11 @@ OntoBricks can be positioned as the **semantic layer for the Databricks Lakehous
 
 ### Triple-store backends
 
-| Backend | Status | Use case |
-|---|---|---|
-| **Delta Lake (SQL Warehouse)** | GA | Default; governed, UC-lineage, liquid clustering |
+
+| Backend                        | Status | Use case                                         |
+| ------------------------------ | ------ | ------------------------------------------------ |
+| **Delta Lake (SQL Warehouse)** | GA     | Default; governed, UC-lineage, liquid clustering |
+
 
 ### Core capabilities
 
@@ -78,7 +80,7 @@ OntoBricks can be positioned as the **semantic layer for the Databricks Lakehous
 
 ## Roadmap
 
-### v0.4.0 — Lakebase as Primary Triple Store (June 2026)
+### v0.4.0 — Lakebase as Primary Triple Store (May 2026)
 
 **Theme:** replace the embedded graph engine with Lakebase (Databricks-managed Postgres Autoscaling) as a first-class, production-grade triple store.
 
@@ -97,25 +99,36 @@ Lakebase Postgres is Databricks' managed, autoscaling Postgres service. Using it
 
 #### Also in v0.4.0 — Stabilization
 
-| Item | Type | Priority |
-|---|---|---|
-| Fix pre-existing test failures | Bug | P0 |
-| Security dependency updates | Security | P0 |
-| Support non-HTTP(S) URIs in Lakebase reasoning materialization | Bug | P1 |
-| Cohort discovery: persist rule library to registry (not session-only) | Feature | P1 |
-| E2E tests for Build → Knowledge Graph happy path | Test | P2 |
+
+| Item                                                                  | Type     | Priority |
+| --------------------------------------------------------------------- | -------- | -------- |
+| Fix pre-existing test failures                                        | Bug      | P0       |
+| Security dependency updates                                           | Security | P0       |
+| Support non-HTTP(S) URIs in Lakebase reasoning materialization        | Bug      | P1       |
+| Cohort discovery: persist rule library to registry (not session-only) | Feature  | P1       |
+| E2E tests for Build → Knowledge Graph happy path                      | Test     | P2       |
+
 
 ---
 
-### v0.5.0 — Lakebase SPARQL Federation (July 2026)
+### v0.5.0 — UX & Workflow Improvements (July 2026)
 
-**Theme:** federate SPARQL queries across multiple domain graphs in a single Lakebase Postgres instance.
+**Theme:** improve day-to-day usability across the Graph Chat, Mapping, Ontology, and Scheduler modules based on direct user feedback.
 
-| Capability | Description |
-|---|---|
-| Cross-domain SPARQL queries | Query multiple domain graphs in a single SPARQL statement |
-| OntoBricks Query Playground | Interactive SPARQL editor with live result table |
-| Query explain view | Inspect the translated SQL and execution plan for any SPARQL query |
+
+| Capability                                  | Description                                                                                               |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Graph Chat performance**                  | Reduce end-to-end latency for the Digital Twin Graph Chat agent                                           |
+| **Mapping — exclude unmapped**              | Add a one-click button to exclude all unmapped elements from the active mapping                           |
+| **Digital Twin publication workflow**       | Introduce a guided publication workflow for promoting a Digital Twin to a versioned, registered release   |
+| **Ontology precision scoring**              | Score the semantic precision of a generated ontology and surface actionable improvement hints             |
+| **Auto quality rules**                      | Automatically suggest and add SHACL / SWRL data-quality rules based on the active ontology                |
+| **Ontology iteration UX**                   | Manage and iterate over generated ontology versions — compare, diff, promote, and rollback                |
+| **Mapping — multi-select**                  | Enable multi-select of entities and relationships in the Mapping canvas                                   |
+| **Mapping — orphan detection**              | Validate that all mapped entities are connected (no isolated nodes without relationships)                 |
+| **Scheduler — inference & materialization** | Extend the scheduler to trigger OWL 2 RL inference and SWRL materialization as scheduled tasks            |
+| **Unstructured data ingestion**             | Allow unstructured information (documents, free text) to be incorporated into the ontology and graph data |
+
 
 ---
 
@@ -134,14 +147,16 @@ Neo4j is the dominant graph database with 40%+ market share. Customers in financ
 
 #### OWL → Property Graph mapping
 
-| OWL concept | Neo4j representation |
-|---|---|
-| Class | Node label |
-| Object property | Relationship type |
-| Datatype property | Node property |
-| Sub-class | Additional label on child node |
-| Inferred triple (SWRL/OWL) | Node/relationship with `:Inferred` marker |
-| Named graph | Neo4j database (Enterprise) or label prefix (Community) |
+
+| OWL concept                | Neo4j representation                                    |
+| -------------------------- | ------------------------------------------------------- |
+| Class                      | Node label                                              |
+| Object property            | Relationship type                                       |
+| Datatype property          | Node property                                           |
+| Sub-class                  | Additional label on child node                          |
+| Inferred triple (SWRL/OWL) | Node/relationship with `:Inferred` marker               |
+| Named graph                | Neo4j database (Enterprise) or label prefix (Community) |
+
 
 #### Key capabilities
 
@@ -159,15 +174,17 @@ Neo4j is the dominant graph database with 40%+ market share. Customers in financ
 
 **Theme:** prepare OntoBricks for large enterprise deployments with strict governance, performance, and multi-tenancy requirements.
 
-| Feature | Description |
-|---|---|
-| **Fine-grained RBAC** | Per-domain, per-version read/write/admin roles via Unity Catalog grants |
+
+| Feature                        | Description                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------ |
+| **Fine-grained RBAC**          | Per-domain, per-version read/write/admin roles via Unity Catalog grants                    |
 | **Multi-workspace federation** | Cross-workspace domain registry sync — read a domain built in workspace A from workspace B |
-| **Audit log** | Every build, reasoning run, and mutation emits a structured event to a Delta audit table |
-| **Large-graph pagination** | Server-side cursor pagination for 10k+ node knowledge graphs |
-| **Scheduled reasoning** | Trigger OWL 2 RL / SWRL inference on a cron schedule |
-| **API key authentication** | Scoped API keys for external REST and GraphQL consumers |
-| **One-command deployment** | Single DAB deploy installs OntoBricks + MCP server + registry together |
+| **Audit log**                  | Every build, reasoning run, and mutation emits a structured event to a Delta audit table   |
+| **Large-graph pagination**     | Server-side cursor pagination for 10k+ node knowledge graphs                               |
+| **Scheduled reasoning**        | Trigger OWL 2 RL / SWRL inference on a cron schedule                                       |
+| **API key authentication**     | Scoped API keys for external REST and GraphQL consumers                                    |
+| **One-command deployment**     | Single DAB deploy installs OntoBricks + MCP server + registry together                     |
+
 
 ---
 
@@ -175,56 +192,60 @@ Neo4j is the dominant graph database with 40%+ market share. Customers in financ
 
 **Theme:** stable API contract, enterprise SLA documentation, and ecosystem integrations.
 
-| Item | Description |
-|---|---|
-| **Stable REST API v1** | SemVer enforced; deprecation policy documented; no breaking changes |
-| **Amazon Neptune connector** | RDF/SPARQL 1.1 over HTTPS |
-| **Azure Cosmos DB connector** | Gremlin API; property graph mapping |
-| **OntoBricks Hub** | Public registry of community ontologies and mapping templates |
-| **Databricks Marketplace** | One-click install from the Databricks Marketplace |
-| **SSO / SCIM provisioning** | Enterprise identity integration |
+
+| Item                          | Description                                                         |
+| ----------------------------- | ------------------------------------------------------------------- |
+| **Stable REST API v1**        | SemVer enforced; deprecation policy documented; no breaking changes |
+| **Amazon Neptune connector**  | RDF/SPARQL 1.1 over HTTPS                                           |
+| **Azure Cosmos DB connector** | Gremlin API; property graph mapping                                 |
+| **OntoBricks Hub**            | Public registry of community ontologies and mapping templates       |
+| **Databricks Marketplace**    | One-click install from the Databricks Marketplace                   |
+| **SSO / SCIM provisioning**   | Enterprise identity integration                                     |
+
 
 ---
 
 ## Feature Matrix
 
-| Feature | v0.3 | v0.4 | v0.5 | v0.6 | v0.7 | v1.0 |
-|---|---|---|---|---|---|---|
-| Delta Lake triple store | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Lakebase named-graph triple store** | — | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Lakebase optimized indexes** | — | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Lakebase SPARQL SELECT** | — | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **SPARQL federation (cross-domain)** | — | — | ✅ | ✅ | ✅ | ✅ |
-| **Neo4j connector** | — | — | — | ✅ | ✅ | ✅ |
-| Fine-grained RBAC | — | — | — | — | ✅ | ✅ |
-| Multi-workspace federation | — | — | — | — | ✅ | ✅ |
-| Amazon Neptune | — | — | — | — | — | ✅ |
-| Databricks Marketplace | — | — | — | — | — | ✅ |
+
+| Feature                               | v0.3 | v0.4 | v0.5 | v0.6 | v0.7 | v1.0 |
+| ------------------------------------- | ---- | ---- | ---- | ---- | ---- | ---- |
+| Delta Lake triple store               | ✅    | ✅    | ✅    | ✅    | ✅    | ✅    |
+| **Lakebase named-graph triple store** | —    | ✅    | ✅    | ✅    | ✅    | ✅    |
+| **Lakebase optimized indexes**        | —    | ✅    | ✅    | ✅    | ✅    | ✅    |
+| **Lakebase SPARQL SELECT**            | —    | ✅    | ✅    | ✅    | ✅    | ✅    |
+| **UX & workflow improvements**        | —    | —    | ✅    | ✅    | ✅    | ✅    |
+| **Neo4j connector**                   | —    | —    | —    | ✅    | ✅    | ✅    |
+| Fine-grained RBAC                     | —    | —    | —    | —    | ✅    | ✅    |
+| Multi-workspace federation            | —    | —    | —    | —    | ✅    | ✅    |
+| Amazon Neptune                        | —    | —    | —    | —    | —    | ✅    |
+| Databricks Marketplace                | —    | —    | —    | —    | —    | ✅    |
+
 
 ---
 
 ## Graph Engine Comparison (v0.4+)
 
-| Capability | Delta Lake | Lakebase (v0.4) | Neo4j (v0.6) |
-|---|---|---|---|
-| **Storage** | Delta table in UC | Postgres (Lakebase Autoscaling) | Neo4j database or AuraDB |
-| **Query language** | Spark SQL | Postgres SQL + SPARQL subset | Cypher |
-| **SPARQL support** | Via Spark SQL translation | Native | Via OntoBricks adapter |
-| **Named graphs** | Per-domain Delta table | ✅ | ✅ |
-| **Transactional reasoning** | Append only | ✅ | ✅ |
-| **Multi-hop traversal** | Recursive CTE (Spark) | Optimized indexes + CTE | Native Cypher (best-in-class) |
-| **Governance / lineage** | Full UC lineage | UC synced table | External |
-| **Deployment** | Built-in | Optional extra | Optional extra |
-| **Best for** | Production, governed data | Databricks-native + SPARQL | Customers with existing Neo4j |
+
+| Capability                  | Delta Lake                | Lakebase (v0.4)                 | Neo4j (v0.6)                  |
+| --------------------------- | ------------------------- | ------------------------------- | ----------------------------- |
+| **Storage**                 | Delta table in UC         | Postgres (Lakebase Autoscaling) | Neo4j database or AuraDB      |
+| **Query language**          | Spark SQL                 | Postgres SQL + SPARQL subset    | Cypher                        |
+| **SPARQL support**          | Via Spark SQL translation | Native                          | Via OntoBricks adapter        |
+| **Named graphs**            | Per-domain Delta table    | ✅                               | ✅                             |
+| **Transactional reasoning** | Append only               | ✅                               | ✅                             |
+| **Multi-hop traversal**     | Recursive CTE (Spark)     | Optimized indexes + CTE         | Native Cypher (best-in-class) |
+| **Governance / lineage**    | Full UC lineage           | UC synced table                 | External                      |
+| **Deployment**              | Built-in                  | Optional extra                  | Optional extra                |
+| **Best for**                | Production, governed data | Databricks-native + SPARQL      | Customers with existing Neo4j |
+
 
 ---
 
 ## Open Questions
 
 1. **Lakebase SPARQL subset scope** — BGP + FILTER covers 80% of use cases; OPTIONAL and UNION add another 15%. Aggregates and property paths are deferred to a later patch.
-
 2. **Neo4j Community vs Enterprise** — named graphs as separate databases require Neo4j Enterprise. Community edition support will use label prefixing as a documented workaround.
-
 3. **Triple store migration UX** — when an admin switches engine (e.g., Delta → Neo4j), OntoBricks will require a rebuild rather than offering an inline migration wizard. A migration assistant is considered for v0.7.
 
 ---
