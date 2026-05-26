@@ -81,6 +81,12 @@ def live_server(_set_env):
     # the rejection branch.
     env.pop("CSRF_DISABLED", None)
 
+    # Capture stdout/stderr into a session log so startup failures are
+    # debuggable. Path is printed on failure.
+    log_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "_e2e_server.log"
+    )
+    log_fh = open(log_path, "w")
     _server_proc = subprocess.Popen(
         [
             sys.executable,
@@ -95,8 +101,8 @@ def live_server(_set_env):
             "warning",
         ],
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
     )
     atexit.register(_kill_server)
 
@@ -104,7 +110,12 @@ def live_server(_set_env):
         _wait_for_server(E2E_PORT)
     except RuntimeError:
         _kill_server()
-        pytest.fail("Failed to start test server")
+        log_fh.close()
+        with open(log_path) as f:
+            tail = f.read()[-4000:]
+        pytest.fail(
+            f"Failed to start test server. uvicorn log tail:\n{tail}"
+        )
 
     yield E2E_BASE
     _kill_server()

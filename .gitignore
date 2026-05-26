@@ -76,3 +76,4 @@ mlartifacts/
 # Cookie jars / curl session dumps (may contain live session + CSRF tokens)
 cookies*.txt
 *.cookiejar
+tests/e2e/_e2e_server.log

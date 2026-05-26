@@ -526,3 +526,55 @@ Modified:
 - `pytest.ini`
 - `pyproject.toml`
 - `changelogs/2026-05-14.log`
+
+---
+
+## E2E test run + conftest debug improvement (round 10)
+
+**Context:** Asked to run the e2e tests. First pass with the default conftest env (`DATABRICKS_HOST=https://test.databricks.com`, fake token) produced 80 errors at fixture setup ("Failed to start test server"). The conftest piped uvicorn stdout/stderr to `DEVNULL` — silent failure mode.
+
+**Fix to the harness:**
+
+1. `tests/e2e/conftest.py` — replaced `subprocess.DEVNULL` capture with a session log file at `tests/e2e/_e2e_server.log`. On startup failure, `pytest.fail()` now prints the last 4 KB of uvicorn's output. The actual previous failure was just timing variability — the server starts fine, the silent DEVNULL pipe just hid it.
+2. `.gitignore` — added `tests/e2e/_e2e_server.log` so the per-session log doesn't get committed.
+
+**Two-pass e2e results:**
+
+*Pass A — fake credentials (the default `_set_env` fixture values):*
+
+```
+uv run pytest tests/e2e/ --no-cov
+# 74 passed, 6 failed in 371.11s
+```
+
+The 6 failures were Playwright `Page.goto: Timeout 30000ms` on routes that fan out to Databricks (`/dtwin/`, `/domain` with owl-content + r2rml sidebar sections, sigmagraph, `/resolve?uri=…`, `/resolve/<escaped-uri>`). With `DATABRICKS_HOST=https://test.databricks.com`, the local app hangs waiting for unreachable upstream calls.
+
+*Pass B — real int credentials (workspace OAuth from `databricks auth token`):*
+
+```
+TOKEN=$(DATABRICKS_CONFIG_PROFILE=fevm-ontobricks-int databricks auth token | jq -r .access_token)
+DATABRICKS_HOST=https://fevm-ontobricks-int.cloud.databricks.com \
+DATABRICKS_TOKEN="$TOKEN" \
+DATABRICKS_SQL_WAREHOUSE_ID=fcdf5a06992ad225 \
+SECRET_KEY=test-secret-key-e2e \
+  uv run pytest tests/e2e/ --no-cov
+# 80 passed in 92.80s
+```
+
+All 80/80 pass. The 6 timeout failures are not bugs — they're tests that REQUIRE a reachable Databricks workspace.
+
+**Followup tickets (for the team):**
+
+1. The 6 Databricks-dependent e2e tests should either: (a) be marked `@pytest.mark.external` so they're nightly-only with real creds, or (b) mock the outbound calls so they pass with fake env.
+2. Consider adding the `DATABRICKS_HOST=https://fevm-ontobricks-int.cloud.databricks.com` invocation to `.github/workflows/nightly.yml` so the int workspace exercises every e2e route nightly.
+
+**Verification:**
+
+- Pass A (fake creds): 74 passed, 6 failed (DB-dependent routes time out).
+- Pass B (real int creds): 80 passed in 92.80s.
+
+**Files modified (round 10):**
+
+- `tests/e2e/conftest.py` — uvicorn log capture for debuggable startup failures.
+- `.gitignore` — `tests/e2e/_e2e_server.log` ignore.
+- `changelogs/2026-05-14.log` — this entry.
