@@ -41,7 +41,7 @@ class R2RMLParser:
         for triples_map in self.graph.subjects(RDF.type, self.RR.TriplesMap):
             mapping_info = self._extract_triples_map(triples_map)
 
-            if mapping_info["has_class"]:
+            if mapping_info["has_class"] and mapping_info["entity"] is not None:
                 entity_mappings.append(mapping_info["entity"])
 
             relationship_mappings.extend(mapping_info["relationships"])
@@ -78,7 +78,13 @@ class R2RMLParser:
                 subject_class = str(cls)
                 info["has_class"] = True
 
-        # Parse table name parts
+        # Parse table name parts; fall back to extracting from sql_query when rr:tableName is absent.
+        # For CTEs / subqueries the extraction is best-effort (sql_query drives actual execution).
+        # Pick the most-qualified identifier (most dots) so a CTE alias loses to the real table.
+        if not table_name and sql_query:
+            candidates = re.findall(r'\bFROM\s+([\w.`"]+)', sql_query, re.IGNORECASE)
+            if candidates:
+                table_name = max(candidates, key=lambda m: m.count('.')).strip('`"')
         catalog, schema, table = self._parse_table_name(table_name)
 
         # Get class name from URI
@@ -92,6 +98,7 @@ class R2RMLParser:
 
         # Process predicate-object maps
         label_column = None
+        attribute_mappings: dict = {}
 
         for pom in self.graph.objects(triples_map, self.RR.predicateObjectMap):
             predicate = None
@@ -107,28 +114,39 @@ class R2RMLParser:
                 for col in self.graph.objects(obj_map, self.RR.column):
                     object_column = str(col)
 
-            # Check for rdfs:label
-            if predicate and predicate.endswith("label"):
-                label_column = object_column
+            if not predicate:
+                continue
 
-            # Check for relationship (object template pointing to another entity)
-            if predicate and object_template and not predicate.endswith("label"):
+            if predicate.endswith("label"):
+                # rdfs:label → label_column
+                label_column = object_column
+            elif object_column and not object_template:
+                # Data property column mapping → collect into attribute_mappings
+                prop_local = (
+                    predicate.split("#")[-1] if "#" in predicate
+                    else predicate.split("/")[-1]
+                )
+                attribute_mappings[prop_local] = object_column
+            elif object_template:
+                # Object property with template → relationship
                 rel_mapping = self._extract_relationship(
                     predicate, object_template, id_column, sql_query
                 )
                 if rel_mapping:
                     info["relationships"].append(rel_mapping)
 
-        # Build entity mapping
-        if info["has_class"] and table:
+        # Build entity mapping (requires class; needs either a table or a sql_query)
+        if info["has_class"] and (table or sql_query):
             info["entity"] = {
                 "ontology_class": subject_class,
                 "ontology_class_label": class_name,
                 "catalog": catalog or "",
                 "schema": schema or "",
-                "table": table,
+                "table": table or "",
+                "sql_query": sql_query or "",
                 "id_column": id_column or "",
                 "label_column": label_column or "",
+                "attribute_mappings": attribute_mappings,
             }
 
         return info
