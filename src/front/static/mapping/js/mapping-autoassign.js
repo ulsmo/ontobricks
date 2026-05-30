@@ -48,6 +48,9 @@ window.AutoAssignModule = {
             if (data.success && data.config) {
                 MappingState.config = data.config;
                 if (typeof _stampExcludedFlags === 'function') _stampExcludedFlags();
+                if (typeof window.updateMappingCompletionStatus === 'function') {
+                    window.updateMappingCompletionStatus();
+                }
                 console.log('[AutoAssign] Mapping config refreshed from server');
             }
         } catch (e) {

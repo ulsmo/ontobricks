@@ -683,6 +683,10 @@ class Mapping:
         parser = R2RMLParser(r2rml_content)
         entity_mappings, relationship_mappings = parser.extract_mappings()
 
+        # Normalize URIs once, before persisting, so stored values always match
+        # the ontology's canonical form (e.g. hash vs slash separator).
+        Mapping._normalize_r2rml_uris(entity_mappings, relationship_mappings, domain.ontology)
+
         domain.assignment["entities"] = entity_mappings
         domain.assignment["relationships"] = relationship_mappings
         domain.assignment["r2rml_output"] = r2rml_content
@@ -693,6 +697,58 @@ class Mapping:
             "entities": entity_mappings,
             "relationships": relationship_mappings,
         }
+
+    @staticmethod
+    def _normalize_r2rml_uris(
+        entities: List[Dict[str, Any]],
+        relationships: List[Dict[str, Any]],
+        ontology: Dict[str, Any],
+    ) -> None:
+        """Rewrite R2RML-parsed URIs to match the ontology's canonical URIs.
+
+        R2RML files often use a different namespace separator (slash vs hash) from
+        the loaded ontology.  Matches by local name and mutates in-place.
+        """
+        if not ontology:
+            return
+
+        classes = ontology.get("classes", [])
+        properties = ontology.get("properties", [])
+
+        class_local_to_uri: Dict[str, str] = {}
+        for c in classes:
+            local = (c.get("name") or c.get("localName") or "").split("#")[-1].split("/")[-1]
+            if local and c.get("uri"):
+                class_local_to_uri[local] = c["uri"]
+
+        prop_local_to_uri: Dict[str, str] = {}
+        for p in properties:
+            local = (p.get("name") or p.get("localName") or "").split("#")[-1].split("/")[-1]
+            if local and p.get("uri"):
+                prop_local_to_uri[local] = p["uri"]
+
+        all_class_uris = {c["uri"] for c in classes if c.get("uri")}
+        all_prop_uris = {p["uri"] for p in properties if p.get("uri")}
+
+        for m in entities:
+            uri = m.get("ontology_class") or m.get("class_uri", "")
+            if not uri or uri in all_class_uris:
+                continue
+            local = uri.split("#")[-1].split("/")[-1]
+            canonical = class_local_to_uri.get(local)
+            if canonical:
+                m["ontology_class"] = canonical
+                logger.debug("R2RML normalize entity class: %s → %s", uri, canonical)
+
+        for m in relationships:
+            uri = m.get("property", "")
+            if not uri or uri in all_prop_uris:
+                continue
+            local = uri.split("#")[-1].split("/")[-1]
+            canonical = prop_local_to_uri.get(local)
+            if canonical:
+                m["property"] = canonical
+                logger.debug("R2RML normalize property: %s → %s", uri, canonical)
 
     def get_mapping_stats(self) -> Dict[str, int]:
         domain = self._domain
