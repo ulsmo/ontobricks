@@ -508,6 +508,67 @@ async def migrate_constraints(
         }
 
 
+@router.get("/dataquality/suggest")
+async def suggest_shapes(session_mgr: SessionManager = Depends(get_session_manager)):
+    """Auto-suggest SHACL shapes from current ontology (read-only, not persisted).
+
+    Introspects OWL classes and properties to produce:
+    - completeness rules (sh:minCount 1) for every declared data property
+    - datatype constraints (sh:datatype) from OWL range declarations
+    - relationship constraints (sh:class) from ObjectProperty domain/range
+
+    Filters out any suggestion whose id already exists in domain.shacl_shapes.
+    """
+    with map_route_errors("SHACL suggestion failed", logger):
+        domain = get_domain(session_mgr)
+        classes = domain.get_classes()
+        properties = domain.get_properties()
+        base_uri = domain.ontology.get("base_uri", "")
+        existing_ids = {s.get("id") for s in domain.shacl_shapes}
+        all_suggestions = SHACLService.suggest_from_ontology(classes, properties, base_uri)
+        new_suggestions = [s for s in all_suggestions if s.get("id") not in existing_ids]
+        return {
+            "success": True,
+            "suggestions": new_suggestions,
+            "total": len(new_suggestions),
+        }
+
+
+@router.post("/dataquality/accept-suggestions")
+async def accept_suggested_shapes(
+    request: Request, session_mgr: SessionManager = Depends(get_session_manager)
+):
+    """Save selected auto-generated SHACL shapes to domain.shacl_shapes.
+
+    Only shapes whose id is not already present are added (no overwrites).
+    """
+    with map_route_errors("Accepting SHACL suggestions failed", logger):
+        data = await request.json()
+        accepted_shapes = data.get("shapes", [])
+        if not accepted_shapes:
+            raise ValidationError("No shapes provided")
+
+        domain = get_domain(session_mgr)
+        existing = list(domain.shacl_shapes)
+        existing_ids = {s.get("id") for s in existing}
+        added = 0
+        for shape in accepted_shapes:
+            if shape.get("id") in existing_ids:
+                continue
+            existing.append(shape)
+            existing_ids.add(shape.get("id"))
+            added += 1
+
+        domain.shacl_shapes = existing
+        domain.save()
+        return {
+            "success": True,
+            "message": f"Added {added} rule(s)",
+            "shapes": existing,
+            "added": added,
+        }
+
+
 # ===========================================
 # SWRL Rules Management
 # ===========================================

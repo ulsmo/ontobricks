@@ -710,6 +710,7 @@ async function applyWizardOntology() {
             if (typeof SidebarNav !== 'undefined' && typeof SidebarNav.switchTo === 'function') {
                 SidebarNav.switchTo('map');
             }
+
         } else {
             showNotification('Error applying ontology: ' + result.message, 'error');
         }
