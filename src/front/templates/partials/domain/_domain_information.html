@@ -115,7 +115,24 @@
                                        placeholder="Your name or organization" 
                                        value="{{ domain.author or '' }}">
                             </div>
-                            
+                        </div>
+
+                        <!-- Ontology Precision Score (populated by JS from /domain/info) -->
+                        <div id="domainPrecisionScoreRow" class="d-none mt-1 mb-2">
+                            <label class="form-label mb-1">
+                                <i class="bi bi-patch-check me-1"></i> Ontology Precision Score
+                            </label>
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="progress flex-grow-1" style="height:10px" title="Ontology precision score">
+                                    <div id="domainPrecisionBar" class="progress-bar" role="progressbar"
+                                         style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                                </div>
+                                <span id="domainPrecisionLabel" class="fw-semibold small" style="min-width:42px"></span>
+                            </div>
+                            <div class="small text-muted mt-1">
+                                <i class="bi bi-info-circle me-1"></i>Last score from the
+                                <strong>Pitfalls</strong> analysis. Run an analysis to refresh.
+                            </div>
                         </div>
                     </div>
 

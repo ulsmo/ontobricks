@@ -203,6 +203,43 @@ window.PitfallsModule = (function () {
         poll();
     }
 
+    // ── Circular gauge ────────────────────────────────────────────────────────
+
+    /**
+     * Update the SVG circular gauge in the section header.
+     * r=28, circumference = 2π×28 ≈ 175.93
+     */
+    function _updateGauge(score) {
+        const CIRCUMFERENCE = 175.93;
+        const wrapper = document.getElementById('pitfallsGaugeWrapper');
+        const arc     = document.getElementById('pitfallsGaugeArc');
+        const label   = document.getElementById('pitfallsGaugeLabel');
+
+        if (!wrapper || !arc || !label) return;
+
+        wrapper.classList.remove('d-none');
+
+        const pct = Math.max(0, Math.min(100, score));
+        const offset = CIRCUMFERENCE * (1 - pct / 100);
+
+        arc.setAttribute('stroke-dashoffset', offset.toFixed(2));
+
+        // Colour: green ≥ 80, orange ≥ 50, red < 50
+        let colour = '#198754';   // green
+        if (pct < 50) colour = '#dc3545';       // red
+        else if (pct < 80) colour = '#fd7e14';  // orange
+        arc.setAttribute('stroke', colour);
+
+        label.textContent = pct;
+
+        // Also update inline score badge inside the results banner
+        const scoreVal = document.getElementById('pitfallsScoreValue');
+        if (scoreVal) {
+            scoreVal.textContent = pct;
+            scoreVal.style.color = colour;
+        }
+    }
+
     // ── Render results ────────────────────────────────────────────────────────
 
     function _renderResults(result) {
@@ -216,6 +253,11 @@ window.PitfallsModule = (function () {
         for (const pitfallResult of Object.values(result.results || {})) {
             const count = pitfallResult.count || pitfallResult.multi_domain_count || 0;
             totalIssues += typeof count === 'number' ? count : 0;
+        }
+
+        // Precision score gauge
+        if (result.precision_score !== undefined && result.precision_score !== null) {
+            _updateGauge(result.precision_score);
         }
 
         // Summary banner

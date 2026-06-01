@@ -1588,6 +1588,13 @@ async def analyze_pitfalls(
                 for r in result["results"].values()
                 if isinstance(r.get("count"), int)
             )
+
+            # Persist precision score to session so the domain home panel can display it.
+            precision_score = result.get("precision_score")
+            if precision_score is not None:
+                domain.precision_score = precision_score
+                domain.save()
+
             tm.complete_task(
                 task.id,
                 result=result,
