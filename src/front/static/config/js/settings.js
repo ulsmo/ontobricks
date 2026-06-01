@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', function () {
     // Registry rebuilt on every loadLakebaseObjects call; keyed by domain base name.
     // Avoids embedding JSON in onclick HTML attributes (double quotes break the attribute).
     let _lkDomainRegistry = {};
+    // UC/Lakeflow objects keyed by domain base name; populated by loadLakebaseSyncObjects.
+    let _lkUCRegistry = {};
 
     function escapeHtmlSettings(str) { return escapeHtml(str); }
 
@@ -998,6 +1000,7 @@ document.addEventListener('DOMContentLoaded', function () {
             // up items by key without embedding JSON in HTML attributes
             // (embedded JSON with " quotes breaks onclick="..." delimiters).
             _lkDomainRegistry = {};   // reset for this load
+            _lkUCRegistry = {};
 
             [...tables.map(o => ({ kind: 'table', schemaName: o.schema, name: o.name })),
              ...views.map(o => ({ kind: 'view',  schemaName: o.schema, name: o.name }))]
@@ -1015,52 +1018,59 @@ document.addEventListener('DOMContentLoaded', function () {
                 + ' <span><i class="bi bi-eye-slash me-1"></i>Registry schema'
                 + ' (<code>' + escapeHtmlSettings(regSchema) + '</code>) hidden.</span></p>';
 
-            // Schemas (containers — drop only when dropping everything)
-            if (schemas.length > 0) {
-                html += '<div class="mb-3">';
-                html += '<div class="d-flex align-items-center gap-2 mb-1">'
-                    + '<span class="fw-semibold small text-muted text-uppercase" style="letter-spacing:.05em">Schemas</span></div>';
-                html += '<table class="table table-sm table-bordered small mb-0"><thead class="table-light"><tr>'
-                    + '<th>Type</th><th>Name</th><th class="text-end">Action</th>'
-                    + '</tr></thead><tbody>';
-                schemas.forEach(o => {
-                    html += mkObjectRow('schema', o.name, o.name);
-                });
-                html += '</tbody></table></div>';
-            }
-
-            // Domain groups
+            // Domain groups — custom collapse cards, one per domain, collapsed by default
             const domainKeys = Object.keys(_lkDomainRegistry).sort();
-            domainKeys.forEach(key => {
-                const grp = _lkDomainRegistry[key];
-                // views first (drop order: views before tables)
-                const sorted = [...grp.items].sort((a, b) => {
-                    if (a.kind === b.kind) return 0;
-                    return a.kind === 'view' ? -1 : 1;
-                });
-                // Store sorted order back so dropDomainObjects picks it up
-                grp.sortedItems = sorted;
+            if (domainKeys.length > 0) {
+                html += '<div class="lk-domain-cards">';
+                domainKeys.forEach((key, idx) => {
+                    const grp = _lkDomainRegistry[key];
+                    // views first (drop order: views before tables)
+                    const sorted = [...grp.items].sort((a, b) => {
+                        if (a.kind === b.kind) return 0;
+                        return a.kind === 'view' ? -1 : 1;
+                    });
+                    // Store sorted order back so dropDomainObjects picks it up
+                    grp.sortedItems = sorted;
+                    const collapseId = 'lkDomainCollapse_' + idx;
 
-                html += '<div class="mb-3 border rounded">';
-                html += '<div class="d-flex align-items-center justify-content-between px-3 py-2 bg-body-secondary rounded-top">';
-                html += '<span class="fw-semibold small"><i class="bi bi-folder2 me-1 text-muted"></i>'
-                    + escapeHtmlSettings(key)
-                    + ' <span class="badge bg-secondary-subtle text-secondary-emphasis border ms-1">'
-                    + grp.items.length + '</span></span>';
-                // data-lk-domain carries the key; click is wired after innerHTML is set
-                html += '<button type="button" class="btn btn-sm btn-outline-danger py-0 lk-drop-domain-btn"'
-                    + ' data-lk-domain="' + escapeHtmlSettings(key) + '"'
-                    + ' title="Delete all objects for this domain">'
-                    + '<i class="bi bi-trash3 me-1"></i>Delete domain\'s objects</button>';
-                html += '</div>';
-                html += '<table class="table table-sm small mb-0"><thead class="table-light"><tr>'
-                    + '<th>Type</th><th>Name</th><th class="text-end">Action</th>'
-                    + '</tr></thead><tbody>';
-                sorted.forEach(o => {
-                    html += mkObjectRow(o.kind, o.schemaName, o.name);
+                    html += '<div class="lk-domain-card">';
+
+                    // ── header ────────────────────────────────────────────
+                    html += '<div class="lk-domain-header">';
+                    html += '<button class="lk-domain-toggle" type="button"'
+                        + ' data-bs-toggle="collapse" data-bs-target="#' + collapseId + '"'
+                        + ' aria-expanded="false" aria-controls="' + collapseId + '">';
+                    html += '<i class="bi bi-chevron-right lk-chevron"></i>';
+                    html += '<i class="bi bi-folder2 text-muted" style="font-size:.85rem"></i>';
+                    html += '<span class="lk-domain-name">' + escapeHtmlSettings(key) + '</span>';
+                    html += '<span class="badge bg-secondary-subtle text-secondary-emphasis border lk-domain-count">'
+                        + grp.items.length + '</span>';
+                    html += '</button>';
+                    html += '<button type="button"'
+                        + ' class="btn btn-sm btn-outline-danger lk-domain-delete-btn lk-drop-domain-btn"'
+                        + ' data-lk-domain="' + escapeHtmlSettings(key) + '"'
+                        + ' title="Delete all objects for this domain">'
+                        + '<i class="bi bi-trash3 me-1"></i>Delete</button>';
+                    html += '</div>';
+
+                    // ── body ──────────────────────────────────────────────
+                    html += '<div id="' + collapseId + '" class="collapse lk-domain-body">';
+                    html += '<table class="table table-sm mb-0"><thead class="table-light"><tr>'
+                        + '<th style="width:90px">Type</th><th>Name</th>'
+                        + '<th class="text-end" style="width:90px">Action</th>'
+                        + '</tr></thead><tbody>';
+                    sorted.forEach(o => {
+                        html += mkObjectRow(o.kind, o.schemaName, o.name);
+                    });
+                    html += '</tbody></table>';
+                    // Placeholder filled by loadLakebaseSyncObjects() after the main load
+                    html += '<div class="lk-sync-slot" data-lk-base="' + escapeHtmlSettings(key) + '"></div>';
+                    html += '</div>';
+
+                    html += '</div>'; // /.lk-domain-card
                 });
-                html += '</tbody></table></div>';
-            });
+                html += '</div>'; // /.lk-domain-cards
+            }
 
 
             result.innerHTML = html;
@@ -1082,6 +1092,17 @@ document.addEventListener('DOMContentLoaded', function () {
                     );
                 });
             });
+
+            // Toggle .lk-open on the card for chevron rotation + header style
+            result.querySelectorAll('.lk-domain-card').forEach(card => {
+                const collapseEl = card.querySelector('.collapse');
+                if (!collapseEl) return;
+                collapseEl.addEventListener('show.bs.collapse', () => card.classList.add('lk-open'));
+                collapseEl.addEventListener('hide.bs.collapse', () => card.classList.remove('lk-open'));
+            });
+
+            // Best-effort: load UC/Lakeflow sync objects and inject into each domain slot
+            loadLakebaseSyncObjects(database, branchPath);
         } catch (e) {
             result.innerHTML = '<div class="alert alert-danger small py-2 mt-2">'
                 + escapeHtmlSettings(e.message || 'Network error') + '</div>';
@@ -1156,7 +1177,7 @@ document.addEventListener('DOMContentLoaded', function () {
         modal.show();
     }
 
-    /** Drop all objects for a domain (views first, then tables).
+    /** Drop all objects for a domain (views first, then tables, then UC/Lakeflow sync objects).
      *  Takes only the registry key — items are looked up from _lkDomainRegistry
      *  to avoid embedding JSON in HTML onclick attributes. */
     function dropDomainObjects(domainKey) {
@@ -1166,14 +1187,24 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         const { schema, sortedItems: items } = entry;
+        const ucItems = _lkUCRegistry[domainKey] || [];
         const database   = document.getElementById('lakebaseGraphDb')?.value  || '';
         const branchPath = document.getElementById('lakebaseBranch')?.value   || '';
-        const count = items.length;
+        const count = items.length + ucItems.length;
 
-        const listHtml = items.map(o =>
+        const pgListHtml = items.map(o =>
             '<li class="font-monospace small">' + escapeHtmlSettings(o.kind) + ': '
             + escapeHtmlSettings(o.name) + '</li>'
         ).join('');
+        const ucListHtml = ucItems.map(u =>
+            '<li class="font-monospace small">'
+            + (u.is_sync ? 'sync (Lakeflow): ' : 'delta: ')
+            + escapeHtmlSettings(u.full_name) + '</li>'
+        ).join('');
+        const listHtml = pgListHtml + (ucListHtml
+            ? '<li class="small text-muted mt-1 fw-semibold" style="list-style:none;margin-left:-1rem">Unity Catalog</li>'
+              + ucListHtml
+            : '');
 
         const bodyContent = 'Drop all <strong>' + count + ' object' + (count !== 1 ? 's' : '')
             + '</strong> for domain <code>' + escapeHtmlSettings(domainKey) + '</code>?'
@@ -1185,7 +1216,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (!modalEl || !bodyEl || !confirmBtn) {
             if (window.confirm('Drop all ' + count + ' objects for domain ' + domainKey + '?')) {
-                _execDropAll(items, schema, database, branchPath);
+                _execDropAll(items, schema, database, branchPath, ucItems);
             }
             return;
         }
@@ -1196,19 +1227,22 @@ document.addEventListener('DOMContentLoaded', function () {
         const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         newBtn.addEventListener('click', function () {
             modal.hide();
-            _execDropAll(items, schema, database, branchPath);
+            _execDropAll(items, schema, database, branchPath, ucItems);
         });
         modal.show();
     }
 
-    /** Execute sequential drops for a list of {kind, name} items. */
-    async function _execDropAll(items, schema, database, branchPath) {
+    /** Execute sequential drops: Postgres objects first, then UC/Lakeflow sync objects. */
+    async function _execDropAll(items, schema, database, branchPath, ucItems = []) {
         const result = document.getElementById('lakebaseObjectsResult');
         const errors = [];
-        _showDropSpinner(result, 'Deleting ' + items.length + ' object' + (items.length !== 1 ? 's' : '') + '…');
+        const total = items.length + ucItems.length;
+        _showDropSpinner(result, 'Deleting ' + total + ' object' + (total !== 1 ? 's' : '') + '…');
+
+        // ── Postgres objects ─────────────────────────────────────────────
         for (let i = 0; i < items.length; i++) {
             const o = items[i];
-            _showDropSpinner(result, 'Dropping ' + o.kind + ' ' + o.name + ' (' + (i + 1) + '/' + items.length + ')…');
+            _showDropSpinner(result, 'Dropping ' + o.kind + ' ' + o.name + ' (' + (i + 1) + '/' + total + ')…');
             try {
                 const resp = await fetch('/settings/graph-engine/lakebase-drop-object', {
                     method: 'POST',
@@ -1226,6 +1260,30 @@ document.addEventListener('DOMContentLoaded', function () {
                 errors.push(o.kind + ' ' + o.name + ': ' + (e.message || 'network error'));
             }
         }
+
+        // ── UC / Lakeflow sync objects ────────────────────────────────────
+        for (let j = 0; j < ucItems.length; j++) {
+            const u = ucItems[j];
+            const label = (u.is_sync ? 'sync' : 'delta') + ' ' + u.full_name;
+            _showDropSpinner(result, 'Dropping ' + label + ' (' + (items.length + j + 1) + '/' + total + ')…');
+            try {
+                const resp = await fetch('/settings/graph-engine/drop-uc-object', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ full_name: u.full_name, is_sync: u.is_sync }),
+                });
+                let data = {};
+                try { data = await resp.json(); } catch (_) { /* non-JSON body */ }
+                if (!data.success) {
+                    const detail = data.detail || data.message || (resp.ok ? 'server returned failure' : 'HTTP ' + resp.status);
+                    errors.push(label + ': ' + detail);
+                }
+            } catch (e) {
+                errors.push(label + ': ' + (e.message || 'network error'));
+            }
+        }
+
         if (errors.length) {
             showNotification('Drops failed:\n' + errors.join('\n'), 'danger');
             if (result) {
@@ -1240,6 +1298,212 @@ document.addEventListener('DOMContentLoaded', function () {
         await loadLakebaseObjects();
     }
 
+
+    /** Fetch UC/Lakeflow synced-table objects and inject into each domain's sync slot. */
+    async function loadLakebaseSyncObjects(database, branchPath) {
+        const slots = document.querySelectorAll('.lk-sync-slot');
+        if (!slots.length) return;
+
+        // Show a spinner in each slot while loading
+        slots.forEach(slot => {
+            slot.innerHTML = '<div class="lk-sync-loading d-flex align-items-center gap-2 px-3 py-2 border-top">'
+                + '<span class="spinner-border spinner-border-sm text-muted" aria-hidden="true"></span>'
+                + '<span class="small text-muted">Loading sync objects…</span></div>';
+        });
+
+        function stateBadge(state) {
+            const map = {
+                ONLINE: 'bg-success-subtle text-success-emphasis',
+                ONLINE_NO_PENDING_UPDATE: 'bg-success-subtle text-success-emphasis',
+                PROVISIONING: 'bg-info-subtle text-info-emphasis',
+                PROVISIONING_INITIAL_SNAPSHOT: 'bg-info-subtle text-info-emphasis',
+                PROVISIONING_PIPELINE_RESOURCES: 'bg-info-subtle text-info-emphasis',
+                ONLINE_TRIGGERED_UPDATE: 'bg-info-subtle text-info-emphasis',
+                ONLINE_CONTINUOUS_UPDATE: 'bg-info-subtle text-info-emphasis',
+                FAILED: 'bg-danger-subtle text-danger-emphasis',
+                OFFLINE_FAILED: 'bg-danger-subtle text-danger-emphasis',
+                TABLED_OFFLINE: 'bg-danger-subtle text-danger-emphasis',
+                ERROR: 'bg-danger-subtle text-danger-emphasis',
+                NOT_FOUND: 'bg-secondary-subtle text-secondary-emphasis',
+                TIMEOUT: 'bg-warning-subtle text-warning-emphasis',
+                UNKNOWN: 'bg-secondary-subtle text-secondary-emphasis',
+            };
+            const cls = map[state] || 'bg-secondary-subtle text-secondary-emphasis';
+            return '<span class="badge border ' + cls + ' lk-sync-state-badge">'
+                + escapeHtmlSettings(state || '—') + '</span>';
+        }
+
+        try {
+            const params = new URLSearchParams();
+            if (database)   params.set('database',    database);
+            if (branchPath) params.set('branch_path', branchPath);
+            const url = '/settings/graph-engine/lakebase-sync-objects'
+                + (params.toString() ? '?' + params.toString() : '');
+            const resp = await fetch(url, { credentials: 'same-origin' });
+            const data = resp.ok ? await resp.json() : {};
+
+            if (!data.success || !data.uc_tables?.length) {
+                slots.forEach(slot => { slot.innerHTML = ''; });
+                return;
+            }
+
+            // Group UC tables by domain base name:
+            //   "domain_v1_sync"  → base "domain_v1"  (Lakeflow synced table)
+            //   "domain_v1"       → base "domain_v1"  (Delta source table/view)
+            const byBase = {};
+            (data.uc_tables || []).forEach(t => {
+                const base = t.name.endsWith('_sync') ? t.name.slice(0, -5) : t.name;
+                if (!byBase[base]) byBase[base] = [];
+                byBase[base].push(t);
+            });
+            // Publish to module-level registry so dropDomainObjects can include them.
+            _lkUCRegistry = byBase;
+
+            const ucLabel = data.uc_catalog && data.uc_schema
+                ? data.uc_catalog + '.' + data.uc_schema : '';
+
+            slots.forEach(slot => {
+                const base = slot.dataset.lkBase || '';
+                const tables = byBase[base];
+                if (!tables || !tables.length) {
+                    slot.innerHTML = '';
+                    return;
+                }
+
+                let h = '<div class="lk-sync-section border-top">';
+                h += '<div class="lk-sync-header px-3 py-1 d-flex align-items-center gap-2">'
+                    + '<span class="small text-muted fw-semibold" style="letter-spacing:.04em;font-size:.72rem;text-transform:uppercase">'
+                    + '<i class="bi bi-table me-1"></i>Unity Catalog</span>';
+                if (ucLabel) {
+                    h += '<span class="badge bg-light border text-muted font-monospace" style="font-size:.68rem">'
+                        + escapeHtmlSettings(ucLabel) + '</span>';
+                }
+                h += '</div>';
+                h += '<table class="table table-sm mb-0 lk-sync-table"><tbody>';
+
+                function mkUCDropBtn(fullName, isSync) {
+                    return '<button type="button" class="btn btn-outline-danger btn-sm py-0 px-1 lk-drop-uc-btn"'
+                        + ' data-lk-full-name="' + escapeHtmlSettings(fullName) + '"'
+                        + ' data-lk-is-sync="' + (isSync ? '1' : '0') + '"'
+                        + ' title="Drop ' + escapeHtmlSettings(fullName) + '">'
+                        + '<i class="bi bi-trash" style="font-size:.75rem"></i></button>';
+                }
+
+                tables.forEach(t => {
+                    if (t.is_sync) {
+                        // Lakeflow synced-table registration row
+                        const pipelineLink = t.pipeline_id
+                            ? ' <a href="#" class="lk-sync-pipeline-link small text-muted ms-1"'
+                              + ' data-lk-pipeline-id="' + escapeHtmlSettings(t.pipeline_id) + '"'
+                              + ' title="Copy pipeline ID: ' + escapeHtmlSettings(t.pipeline_id) + '">'
+                              + '<i class="bi bi-clipboard" style="font-size:.7rem"></i></a>'
+                            : '';
+                        const errorTip = t.error
+                            ? ' <span class="text-danger ms-1" title="' + escapeHtmlSettings(t.error) + '">'
+                              + '<i class="bi bi-exclamation-circle" style="font-size:.75rem"></i></span>'
+                            : '';
+                        h += '<tr>'
+                            + '<td style="width:90px"><span class="badge border bg-warning-subtle text-warning-emphasis lk-sync-badge">sync</span></td>'
+                            + '<td class="font-monospace lk-sync-uc-cell">'
+                            + escapeHtmlSettings(t.full_name) + errorTip + '</td>'
+                            + '<td class="text-end" style="width:120px">'
+                            + (t.state ? stateBadge(t.state) : '') + pipelineLink
+                            + ' ' + mkUCDropBtn(t.full_name, true) + '</td>'
+                            + '</tr>';
+                        // Lakeflow source table sub-row
+                        if (t.source_table) {
+                            h += '<tr class="lk-sync-source-row">'
+                                + '<td></td>'
+                                + '<td class="font-monospace lk-sync-uc-cell text-muted" colspan="2">'
+                                + '<i class="bi bi-arrow-return-right me-1 text-muted" style="font-size:.7rem"></i>'
+                                + 'source: ' + escapeHtmlSettings(t.source_table) + '</td>'
+                                + '</tr>';
+                        }
+                    } else {
+                        // Delta table / view row
+                        const typeBadge = (t.table_type || '').toLowerCase() === 'view'
+                            ? '<span class="badge border bg-info-subtle text-info-emphasis lk-sync-badge">view</span>'
+                            : '<span class="badge border bg-primary-subtle text-primary-emphasis lk-sync-badge">delta</span>';
+                        h += '<tr>'
+                            + '<td style="width:90px">' + typeBadge + '</td>'
+                            + '<td class="font-monospace lk-sync-uc-cell text-muted">'
+                            + escapeHtmlSettings(t.full_name) + '</td>'
+                            + '<td class="text-end" style="width:120px">'
+                            + mkUCDropBtn(t.full_name, false) + '</td>'
+                            + '</tr>';
+                    }
+                });
+
+                h += '</tbody></table></div>';
+                slot.innerHTML = h;
+
+                slot.querySelectorAll('.lk-sync-pipeline-link').forEach(a => {
+                    a.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        const pid = this.dataset.lkPipelineId || '';
+                        if (pid && navigator.clipboard) {
+                            navigator.clipboard.writeText(pid).then(() => {
+                                showNotification('Pipeline ID copied: ' + pid, 'info', 2000);
+                            });
+                        } else if (pid) {
+                            showNotification('Pipeline ID: ' + pid, 'info', 3000);
+                        }
+                    });
+                });
+
+                slot.querySelectorAll('.lk-drop-uc-btn').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        dropUCObject(
+                            this.dataset.lkFullName,
+                            this.dataset.lkIsSync === '1',
+                        );
+                    });
+                });
+            });
+        } catch (e) {
+            slots.forEach(slot => { slot.innerHTML = ''; });
+        }
+    }
+
+    /** Ask for confirmation, then DROP a Unity Catalog table or Lakeflow synced-table. */
+    function dropUCObject(fullName, isSync) {
+        const kindLabel = isSync ? 'Lakeflow sync table' : 'UC table';
+        const warn = isSync
+            ? '<br><small class="text-muted">This will also remove the Lakeflow pipeline registration.</small>'
+            : '';
+        const modalEl  = document.getElementById('lkDropConfirmModal');
+        const bodyEl   = document.getElementById('lkDropConfirmModalBody');
+        const confirmBtn = document.getElementById('lkDropConfirmBtn');
+        if (!modalEl || !bodyEl || !confirmBtn) { return; }
+
+        bodyEl.innerHTML = 'Are you sure you want to drop the ' + kindLabel
+            + ' <strong>' + escapeHtmlSettings(fullName) + '</strong>?' + warn;
+
+        const fresh = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(fresh, confirmBtn);
+        fresh.addEventListener('click', async function () {
+            bootstrap.Modal.getInstance(modalEl)?.hide();
+            try {
+                const resp = await fetch('/settings/graph-engine/drop-uc-object', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ full_name: fullName, is_sync: isSync }),
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    showNotification('Dropped: ' + fullName, 'success', 3000);
+                    loadLakebaseObjects();
+                } else {
+                    showNotification('Error: ' + (result.message || result.detail || 'Unknown error'), 'error', 5000);
+                }
+            } catch (err) {
+                showNotification('Request failed: ' + err.message, 'error', 5000);
+            }
+        });
+
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
 
     document.getElementById('btnLoadLakebaseObjects')?.addEventListener('click', loadLakebaseObjects);
 
