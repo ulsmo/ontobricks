@@ -508,6 +508,127 @@ async def migrate_constraints(
         }
 
 
+@router.post("/dataquality/cleanup")
+async def cleanup_shapes(session_mgr: SessionManager = Depends(get_session_manager)):
+    """Remove SHACL shapes that are stale or reference excluded mapping entries.
+
+    A shape is considered stale when any of the following is true:
+    - Its ``target_class_uri`` is set but matches no current ontology class (by URI or name).
+    - Its ``property_uri`` is set, is not a W3C standard URI, and matches no current
+      ontology property or data-property (by URI or name).
+    - Its ``target_class_uri`` corresponds to an entity mapping entry marked ``excluded``.
+    - Its ``property_uri`` corresponds to a relationship mapping entry marked ``excluded``.
+
+    Global / structural shapes (empty ``target_class_uri``) are always kept.
+    """
+    with map_route_errors("SHACL cleanup failed", logger):
+        domain = get_domain(session_mgr)
+        classes = domain.get_classes()
+        properties = domain.get_properties()
+
+        class_uris = {c.get("uri") for c in classes if c.get("uri")}
+        class_names = {c.get("name") for c in classes if c.get("name")}
+        prop_uris = {p.get("uri") for p in properties if p.get("uri")}
+        prop_names = {p.get("name") for p in properties if p.get("name")}
+
+        for cls in classes:
+            for dp in cls.get("dataProperties", []):
+                if dp.get("uri"):
+                    prop_uris.add(dp["uri"])
+                if dp.get("name"):
+                    prop_names.add(dp["name"])
+
+        def _local_name(uri: str) -> str:
+            if not uri:
+                return ""
+            idx = max(uri.rfind("#"), uri.rfind("/"))
+            return uri[idx + 1:] if idx >= 0 else uri
+
+        # Excluded mapping URIs — index by full URI *and* local name for robust matching
+        excluded_class_uris: set = set()
+        excluded_class_locals: set = set()
+        for m in domain.get_entity_mappings():
+            if m.get("excluded") and m.get("ontology_class"):
+                oc = m["ontology_class"]
+                excluded_class_uris.add(oc)
+                excluded_class_locals.add(_local_name(oc).lower())
+
+        excluded_prop_uris: set = set()
+        excluded_prop_locals: set = set()
+        for m in domain.get_relationship_mappings():
+            if m.get("excluded") and m.get("property"):
+                p = m["property"]
+                excluded_prop_uris.add(p)
+                excluded_prop_locals.add(_local_name(p).lower())
+
+        def _is_stale(shape: dict) -> bool:
+            cls_uri = shape.get("target_class_uri", "")
+            cls_name = shape.get("target_class", "")
+            prop_uri = shape.get("property_uri", "")
+            prop_name = shape.get("property_path", "")
+
+            # Global/structural shapes — always keep
+            if not cls_uri and not cls_name:
+                return False
+
+            # Check excluded mapping entries (URI, local-name, or plain name)
+            cls_key = cls_uri or cls_name
+            if (
+                cls_key in excluded_class_uris
+                or _local_name(cls_key).lower() in excluded_class_locals
+                or cls_name.lower() in excluded_class_locals
+            ):
+                return True
+
+            if prop_uri or prop_name:
+                prop_key = prop_uri or prop_name
+                if (
+                    prop_key in excluded_prop_uris
+                    or _local_name(prop_key).lower() in excluded_prop_locals
+                    or prop_name.lower() in excluded_prop_locals
+                ):
+                    return True
+
+            # Check parameter values that reference classes (sh:class, sh:node)
+            params = shape.get("parameters", {})
+            for param_key in ("sh:class", "sh:node"):
+                ref = params.get(param_key, "")
+                if ref and (
+                    ref in excluded_class_uris
+                    or _local_name(ref).lower() in excluded_class_locals
+                ):
+                    return True
+
+            # Class no longer in ontology
+            if cls_uri not in class_uris and cls_uri not in class_names:
+                if _local_name(cls_uri) not in class_names:
+                    return True
+
+            # Property no longer in ontology (skip W3C standard URIs)
+            if prop_uri and "w3.org" not in prop_uri:
+                if (
+                    prop_uri not in prop_uris
+                    and prop_uri not in prop_names
+                    and _local_name(prop_uri) not in prop_names
+                ):
+                    return True
+
+            return False
+
+        existing = list(domain.shacl_shapes)
+        kept = [s for s in existing if not _is_stale(s)]
+        removed = len(existing) - len(kept)
+
+        domain.shacl_shapes = kept
+        domain.save()
+        return {
+            "success": True,
+            "message": f"Removed {removed} stale rule(s)",
+            "shapes": kept,
+            "removed": removed,
+        }
+
+
 @router.get("/dataquality/suggest")
 async def suggest_shapes(session_mgr: SessionManager = Depends(get_session_manager)):
     """Auto-suggest SHACL shapes from current ontology (read-only, not persisted).

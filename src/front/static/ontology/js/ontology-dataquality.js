@@ -934,6 +934,44 @@ window.DataQualityModule = {
         }
     },
 
+    // --- Cleanup stale rules ---
+
+    async cleanupShapes() {
+        if (window.isActiveVersion === false) return;
+
+        const confirmed = await showConfirmDialog({
+            title: 'Clean up rules',
+            message: 'This will remove all rules whose target class or property no longer exists in the ontology. Continue?',
+            confirmText: 'Clean up',
+            confirmClass: 'btn-warning',
+            icon: 'brush',
+        });
+        if (!confirmed) return;
+
+        try {
+            const resp = await fetch('/ontology/dataquality/cleanup', {
+                method: 'POST',
+                credentials: 'same-origin',
+            });
+            const data = await resp.json();
+            if (data.success) {
+                this.shapes = data.shapes || [];
+                this.renderAll();
+                showNotification(
+                    data.removed > 0
+                        ? `Removed ${data.removed} stale rule(s)`
+                        : 'All rules are up to date — nothing removed',
+                    data.removed > 0 ? 'success' : 'info',
+                );
+            } else {
+                showNotification(data.message || 'Cleanup failed', 'error');
+            }
+        } catch (e) {
+            console.error('[DataQuality] Cleanup error:', e);
+            showNotification('Error during cleanup: ' + (e.message || e), 'error');
+        }
+    },
+
     // --- Auto-generate rules from ontology ---
 
     async openSuggestModal() {

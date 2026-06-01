@@ -14,6 +14,10 @@
                 title="Auto-generate SHACL rules from ontology classes and properties">
             <i class="bi bi-stars me-1"></i> Auto-generate
         </button>
+        <button class="btn btn-outline-warning" onclick="DataQualityModule.cleanupShapes()"
+                title="Remove rules whose target class or property no longer exists in the ontology">
+            <i class="bi bi-brush me-1"></i> Cleanup
+        </button>
         <button class="btn btn-outline-secondary" onclick="DataQualityModule.toggleShaclPanel()">
             <i class="bi bi-code-slash me-1"></i> SHACL
         </button>
