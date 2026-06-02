@@ -136,6 +136,24 @@
     color: #fff;
 }
 
+/* ── Attribute conditions ── */
+
+.swrl-conditions .swrl-condition-row .form-select,
+.swrl-conditions .swrl-condition-row .form-control {
+    font-size: .75rem;
+    padding: 2px 6px;
+    min-width: 0;
+}
+
+.swrl-conditions .swrl-condition-row .form-select {
+    background-position: right .35rem center;
+    padding-right: 1.3rem;
+}
+
+.swrl-conditions .swrl-condition-row {
+    flex-wrap: nowrap;
+}
+
 /* ── SWRL preview block ── */
 
 .swrl-preview-block {

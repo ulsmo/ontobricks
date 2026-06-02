@@ -5,6 +5,8 @@ Moved from app/frontend/ontology/routes.py during the front/back split.
 """
 
 import asyncio
+import json
+import re
 
 from fastapi import APIRouter, Request, Depends
 
@@ -878,6 +880,289 @@ async def validate_rule(rule_type: str, request: Request):
             detail="; ".join(str(e) for e in errors),
         )
     return {"success": True, "valid": True, "message": "Rule is valid"}
+
+
+# ===========================================
+# Business Rules — Auto-generate via Agent
+# ===========================================
+
+# Maps each rule list to its engine validator. SWRL is validated via Ontology.
+_RULE_VALIDATORS_KEYS = ("swrl_rules", "decision_tables", "sparql_rules", "aggregate_rules")
+
+
+def _ontology_name_sets(domain) -> tuple:
+    """Return (class_names, property_names) as lowercased local-name sets.
+
+    Used to verify that generated rules only reference entities/relationships
+    that actually exist in the ontology. Property names include both object
+    properties (relationships) and datatype properties (class attributes).
+    """
+    class_names: set = set()
+    property_names: set = set()
+    for cls in domain.get_classes():
+        name = cls.get("name") or cls.get("localName")
+        if name:
+            class_names.add(name.lower())
+        for dp in cls.get("dataProperties", []) or []:
+            dp_name = dp.get("name") or dp.get("localName")
+            if dp_name:
+                property_names.add(dp_name.lower())
+    for prop in domain.get_properties():
+        name = prop.get("name") or prop.get("localName")
+        if name:
+            property_names.add(name.lower())
+    return class_names, property_names
+
+
+def _validate_business_rule(
+    key: str, rule: dict, class_names: set = None, property_names: set = None
+) -> list:
+    """Return validation errors for *rule* of the given list *key* (empty = valid).
+
+    When ``class_names`` / ``property_names`` are supplied, the rule is also
+    checked so it only references entities/relationships present in the ontology
+    (derived consequent subtypes / result classes / output columns excepted).
+    """
+    if key == "swrl_rules":
+        errors = Ontology.validate_swrl_rule(rule)
+    elif key == "decision_tables":
+        from back.core.reasoning import DecisionTableEngine
+
+        errors = DecisionTableEngine.validate_table(rule)
+    elif key == "sparql_rules":
+        from back.core.reasoning import SPARQLRuleEngine
+
+        errors = SPARQLRuleEngine.validate_rule(rule)
+    elif key == "aggregate_rules":
+        from back.core.reasoning import AggregateRuleEngine
+
+        errors = AggregateRuleEngine.validate_rule(rule)
+    else:
+        return [f"Unknown rule type: {key}"]
+
+    if class_names is not None and property_names is not None:
+        errors = errors + Ontology.rule_reference_errors(
+            key, rule, class_names, property_names
+        )
+    return errors
+
+
+def _norm_ws(value) -> str:
+    """Canonicalise a rule string for duplicate detection.
+
+    Collapses whitespace, normalises the SWRL conjunction glyph, and removes
+    spacing around commas so cosmetic formatting differences don't defeat the
+    duplicate check.
+    """
+    text = re.sub(r"\s+", " ", str(value or "")).strip().lower().replace("\u2227", "^")
+    return re.sub(r"\s*,\s*", ",", text)
+
+
+def _rule_signature(key: str, rule: dict) -> tuple:
+    """Content identity for a rule, used to skip duplicates on accept.
+
+    Two rules with the same logical content collide even if named
+    differently, so re-accepting an already-stored suggestion is a no-op.
+    """
+    if key == "swrl_rules":
+        return ("swrl", _norm_ws(rule.get("antecedent")), _norm_ws(rule.get("consequent")))
+    if key == "sparql_rules":
+        return ("sparql", _norm_ws(rule.get("query")))
+    if key == "decision_tables":
+        cols = tuple(
+            str((c or {}).get("property", "")).lower()
+            for c in rule.get("input_columns") or []
+        )
+        out = str((rule.get("output_column") or {}).get("property", "")).lower()
+        rows = json.dumps(rule.get("rows") or [], sort_keys=True, default=str)
+        return ("dt", str(rule.get("target_class", "")).lower(), cols, out, rows)
+    if key == "aggregate_rules":
+        fields = (
+            "target_class",
+            "group_by_property",
+            "aggregate_property",
+            "aggregate_function",
+            "operator",
+            "threshold",
+            "result_class",
+        )
+        return ("agg",) + tuple(str(rule.get(f, "")).lower() for f in fields)
+    return ("raw", json.dumps(rule, sort_keys=True, default=str))
+
+
+@router.post("/business-rules/generate-async")
+async def generate_business_rules_async(
+    request: Request,
+    session_mgr: SessionManager = Depends(get_session_manager),
+    settings: Settings = Depends(get_settings),
+):
+    """Start business-rules generation via ``agent_business_rules_generator``.
+
+    Proposes SWRL, decision-table, SPARQL, and aggregate rules from the live
+    ontology design and the domain's uploaded documents. Poll
+    ``GET /tasks/{task_id}`` for ``result`` containing the four candidate
+    rule lists; the user reviews and accepts them via
+    ``POST /ontology/business-rules/accept-suggestions``.
+    """
+    import threading
+
+    data = await request.json()
+    guidelines = data.get("guidelines", "")
+    options = data.get("options", {})
+    documents = data.get("documents", [])
+
+    domain = get_domain(session_mgr)
+    host, token, llm_endpoint = require_serving_llm(domain, settings)
+
+    tm = get_task_manager()
+    task = tm.create_task(
+        name="Generate Business Rules",
+        task_type="business_rules_generation",
+        steps=[
+            {"name": "init", "description": "Initializing agent"},
+            {"name": "gather", "description": "Gathering ontology design & documents"},
+            {"name": "generate", "description": "Proposing business rules with AI"},
+            {"name": "finalize", "description": "Finalizing"},
+        ],
+    )
+
+    def run_generation():
+        try:
+            tm.start_task(task.id, "Starting agent…")
+
+            def on_step(msg: str):
+                tm.update_progress(task.id, task.progress, msg)
+
+            agent_result = Ontology(domain).generate_rules_with_agent(
+                host=host,
+                token=token,
+                endpoint_name=llm_endpoint,
+                options=options,
+                guidelines=guidelines,
+                selected_docs=documents,
+                on_step=on_step,
+            )
+
+            if not agent_result.success:
+                tm.fail_task(
+                    task.id, agent_result.error or "Agent did not produce output"
+                )
+                return
+
+            tm.advance_step(task.id, "Finalizing…")
+            tm.complete_task(
+                task.id,
+                result={
+                    "swrl_rules": agent_result.swrl_rules,
+                    "decision_tables": agent_result.decision_tables,
+                    "sparql_rules": agent_result.sparql_rules,
+                    "aggregate_rules": agent_result.aggregate_rules,
+                    "agent_steps": serialize_agent_steps(agent_result.steps),
+                    "agent_iterations": agent_result.iterations,
+                    "agent_usage": agent_result.usage,
+                },
+                message=(
+                    f"Proposed {agent_result.total_rules()} rule(s): "
+                    f"{len(agent_result.swrl_rules)} SWRL, "
+                    f"{len(agent_result.decision_tables)} decision table(s), "
+                    f"{len(agent_result.sparql_rules)} SPARQL, "
+                    f"{len(agent_result.aggregate_rules)} aggregate"
+                ),
+            )
+        except Exception as e:
+            logger.exception("Business rules async generation failed: %s", e)
+            tm.fail_task(task.id, "Business rules generation failed unexpectedly")
+
+    thread = threading.Thread(target=run_generation, daemon=True)
+    thread.start()
+
+    return {"success": True, "task_id": task.id, "message": "Agent task started"}
+
+
+@router.post("/business-rules/accept-suggestions")
+async def accept_business_rules_suggestions(
+    request: Request, session_mgr: SessionManager = Depends(get_session_manager)
+):
+    """Validate and persist the rules the user selected from the suggestions.
+
+    Body: ``{ swrl_rules: [...], decision_tables: [...], sparql_rules: [...],
+    aggregate_rules: [...] }``. Each rule is validated with its engine
+    validator; valid rules are appended to the session and saved. Invalid
+    rules are reported back (with reasons) and skipped.
+    """
+    with map_route_errors("Accepting business rule suggestions failed", logger):
+        data = await request.json()
+        domain = get_domain(session_mgr)
+
+        added: Dict[str, int] = {}
+        rejected: list = []
+        duplicates: list = []
+        dirty = False
+        class_names, property_names = _ontology_name_sets(domain)
+
+        for key in _RULE_VALIDATORS_KEYS:
+            candidates = data.get(key, [])
+            if not isinstance(candidates, list) or not candidates:
+                continue
+
+            if key == "swrl_rules":
+                existing = domain.swrl_rules
+            else:
+                existing = list((domain.ontology or {}).get(key, []))
+
+            # Identity of rules already stored, so we never persist a duplicate.
+            seen = {_rule_signature(key, r) for r in existing if isinstance(r, dict)}
+
+            count = 0
+            for rule in candidates:
+                if not isinstance(rule, dict):
+                    continue
+                errors = _validate_business_rule(
+                    key, rule, class_names, property_names
+                )
+                if errors:
+                    rejected.append(
+                        {
+                            "type": key,
+                            "name": rule.get("name", "(unnamed)"),
+                            "errors": [str(e) for e in errors],
+                        }
+                    )
+                    continue
+                sig = _rule_signature(key, rule)
+                if sig in seen:
+                    duplicates.append(
+                        {"type": key, "name": rule.get("name", "(unnamed)")}
+                    )
+                    continue
+                rule.setdefault("enabled", True)
+                existing.append(rule)
+                seen.add(sig)
+                count += 1
+
+            if count:
+                dirty = True
+                added[key] = count
+                if key == "swrl_rules":
+                    domain.swrl_rules = existing
+                else:
+                    domain._data["ontology"][key] = existing
+
+        if dirty:
+            domain.save()
+
+        return {
+            "success": True,
+            "added": added,
+            "added_total": sum(added.values()),
+            "rejected": rejected,
+            "duplicates": duplicates,
+            "duplicates_total": len(duplicates),
+            "swrl_rules": domain.swrl_rules,
+            "decision_tables": (domain.ontology or {}).get("decision_tables", []),
+            "sparql_rules": (domain.ontology or {}).get("sparql_rules", []),
+            "aggregate_rules": (domain.ontology or {}).get("aggregate_rules", []),
+        }
 
 
 # ===========================================
