@@ -34,6 +34,9 @@ def _extract_issue_count(pitfall_id: str, result: Dict[str, Any]) -> int:
     return 0
 
 
+_MAX_OCCURRENCES_PER_PITFALL = 5  # cap per-pattern count for normalization
+
+
 def compute_precision_score(
     results: Dict[str, Dict[str, Any]],
     metadata: Dict[str, Any],
@@ -41,29 +44,22 @@ def compute_precision_score(
     """Compute a 0–100 ontology precision score from pitfall results.
 
     Critical pitfalls (P1.x) are weighted more heavily than minor ones (P4.x).
-    The weighted penalty is normalized by ontology size (class + property count)
-    so that a small ontology with one issue is not penalised as hard as a large one.
+    Each pitfall's contribution is capped at _MAX_OCCURRENCES_PER_PITFALL so that a
+    single noisy pattern cannot dominate the score.  The denominator is fixed
+    (_MAX_WEIGHT × _MAX_OCCURRENCES_PER_PITFALL), making even a single minor warning
+    produce a score strictly below 100.
 
     Returns:
-        Integer score in [0, 100].  100 = no pitfalls found.
+        Integer score in [0, 100].  100 means zero pitfall occurrences found.
     """
-    size = max(
-        1,
-        (metadata.get("classes") or 0)
-        + (metadata.get("object_properties") or 0)
-        + (metadata.get("datatype_properties") or 0),
-    )
-
     penalty = 0
     for pid, weight in _PITFALL_WEIGHTS.items():
         if pid not in results:
             continue
         count = _extract_issue_count(pid, results[pid])
-        # Cap per-pitfall contribution at `size` to prevent one bad pattern
-        # from dominating the score.
-        penalty += weight * min(count, size)
+        penalty += weight * min(count, _MAX_OCCURRENCES_PER_PITFALL)
 
-    max_penalty = _MAX_WEIGHT * size
+    max_penalty = _MAX_WEIGHT * _MAX_OCCURRENCES_PER_PITFALL  # 36 × 5 = 180
     score = max(0, round(100 * (1 - penalty / max_penalty)))
     return score
 

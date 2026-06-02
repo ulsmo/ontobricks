@@ -1380,6 +1380,16 @@ async def generate_ontology_async(
             )
 
             tm.advance_step(task.id, "Finalizing…")
+
+            iteration_summary = agent_result.iteration_summary or []
+            final_score = (
+                iteration_summary[-1]["score"] if iteration_summary else None
+            )
+            converged = bool(
+                iteration_summary
+                and iteration_summary[-1]["status"] in ("passed", "max_rounds_reached")
+            )
+
             tm.complete_task(
                 task.id,
                 result={
@@ -1388,11 +1398,15 @@ async def generate_ontology_async(
                     "agent_steps": serialize_agent_steps(agent_result.steps),
                     "agent_iterations": agent_result.iterations,
                     "agent_usage": agent_result.usage,
+                    "iteration_summary": iteration_summary,
+                    "generation_score": final_score,
+                    "generation_converged": converged,
                 },
                 message=(
                     f"Generated {stats.get('classes', 0)} classes, "
                     f"{stats.get('properties', 0)} properties "
                     f"({agent_result.iterations} agent iterations)"
+                    + (f" — quality score {final_score}/100" if final_score is not None else "")
                 ),
             )
 
@@ -1780,7 +1794,7 @@ async def analyze_pitfalls(
             tm.complete_task(
                 task.id,
                 result=result,
-                message=f"Analysis complete — {total_issues} issues found across {len(result['selected_pitfalls'])} pitfalls",
+                message=f"Analysis complete — {total_issues} warning{'' if total_issues == 1 else 's'} found across {len(result['selected_pitfalls'])} pitfalls",
             )
 
         except ImportError as exc:

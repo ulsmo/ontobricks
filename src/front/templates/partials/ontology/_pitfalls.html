@@ -27,7 +27,7 @@
 </div>
 
 <div class="card h-100">
-    <div class="card-body p-0">
+    <div class="card-body p-0 d-flex flex-column">
 
         <!-- Tab strip -->
         <ul class="nav nav-tabs ob-tabs" id="pitfallsTabs" role="tablist">
@@ -49,6 +49,19 @@
             </li>
         </ul>
 
+        <!-- Progress area (visible across all tabs while running) -->
+        <div id="pitfallsProgress" class="flex-shrink-0 d-none px-3 py-3 border-bottom">
+            <div class="text-center mb-2">
+                <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                <strong id="pitfallsProgressMsg" class="text-muted">Starting analysis…</strong>
+            </div>
+            <div class="progress pf-progress-md">
+                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                     id="pitfallsProgressBar" role="progressbar" style="width: 0%">0%</div>
+            </div>
+            <small id="pitfallsProgressDetail" class="text-muted mt-1 d-block text-center"></small>
+        </div>
+
         <!-- Tab panes -->
         <div class="tab-content p-3" id="pitfallsTabContent">
 
@@ -69,22 +82,6 @@
 
                 <!-- Pattern checkboxes (rendered synchronously from static taxonomy) -->
                 <div id="pitfallsPatternBody"></div>
-
-                <!-- Progress (stays in Patterns tab while running) -->
-                <div id="pitfallsProgress" class="d-none mt-3">
-                    <div class="card border-primary">
-                        <div class="card-body py-3">
-                            <div class="d-flex align-items-center gap-3 mb-2">
-                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                                <span class="small fw-semibold" id="pitfallsProgressMsg">Starting analysis…</span>
-                            </div>
-                            <div class="progress" style="height: 6px;">
-                                <div class="progress-bar progress-bar-striped progress-bar-animated"
-                                     id="pitfallsProgressBar" role="progressbar" style="width: 0%"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <!-- ── Results pane ───────────────────────────────────────── -->
