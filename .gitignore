@@ -61,6 +61,8 @@ mlartifacts/
 /data/
 
 # changelogs are tracked under CNS (gap #2 fix) — `.cursorrules` mandates a per-day entry per code change.
+# Negate the `*.log` blanket rule above so changelogs/<YYYY-MM-DD>.log keeps tracking.
+!changelogs/*.log
 
 # Internal notes (not pushed)
 /internal/
