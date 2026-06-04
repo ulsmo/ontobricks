@@ -500,6 +500,16 @@ body.ontology-page {
     min-width: 150px;
 }
 
+/* New Assistant dialog: scrollable entity picker */
+.ob-assistant-entity-list {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.ob-assistant-entity-list .assistant-entity-row {
+    cursor: pointer;
+}
+
 .ob-empty-state-icon-lg {
     font-size: 3rem;
 }

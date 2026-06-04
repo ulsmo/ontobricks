@@ -163,6 +163,7 @@ body:is(.read-only-version, .role-viewer) #createViewBtn,
 body:is(.read-only-version, .role-viewer) #renameViewBtn,
 body:is(.read-only-version, .role-viewer) #deleteViewBtn,
 body:is(.read-only-version, .role-viewer) #createGroupFromViewBtn,
+body:is(.read-only-version, .role-viewer) #newAssistantBtn,
 body:is(.read-only-version, .role-viewer) #emptyStateCreateViewBtn,
 /* --- Ontology > Entity Groups: "New Group" CTA. */
 body:is(.read-only-version, .role-viewer) #newGroupBtn,

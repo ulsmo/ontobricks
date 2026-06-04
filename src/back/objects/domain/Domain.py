@@ -1074,16 +1074,17 @@ class Domain:
                 raise ValidationError("No views exist")
             if view_name not in design_layout["views"]:
                 raise NotFoundError(f'View "{view_name}" not found')
-            if len(design_layout["views"]) <= 1:
-                raise ValidationError("Cannot delete the last view")
             del design_layout["views"][view_name]
+            # Deleting the last view is allowed: the UI falls back to the empty
+            # state (current_view becomes None) until a new view is created.
+            remaining = list(design_layout["views"].keys())
             if design_layout.get("current_view") == view_name:
-                design_layout["current_view"] = list(design_layout["views"].keys())[0]
+                design_layout["current_view"] = remaining[0] if remaining else None
             self._s._data["design_layout"] = design_layout
             self._s.save()
             return {
                 "success": True,
-                "views": list(design_layout["views"].keys()),
+                "views": remaining,
                 "current_view": design_layout["current_view"],
             }
         except OntoBricksError:
