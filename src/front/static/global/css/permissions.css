@@ -103,6 +103,26 @@ body[data-domain-role="editor"] [data-requires="editor"] {
 }
 
 /* ==========================================================================
+   Lifecycle status read-only mode (IN-REVIEW / PUBLISHED)
+
+   A domain version is only editable while its lifecycle status is DRAFT.
+   When ``checkVersionStatus`` finds a non-DRAFT status it adds BOTH
+   ``read-only-status`` and ``read-only-version`` to <body>, so all the
+   write-surface gates below (which key off ``read-only-version``) apply
+   uniformly. ``read-only-status`` is kept as a distinct marker for
+   status-specific UI (messaging) and to additionally gate the Build /
+   sync action, which is otherwise builder-gated rather than version-gated.
+   ========================================================================== */
+
+/* --- Digital Twin Build/sync: blocked unless the version is DRAFT. */
+body.read-only-status #syncStartBtn,
+body.read-only-status [data-sync-action="start-triple-store-sync"] {
+    pointer-events: none !important;
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+}
+
+/* ==========================================================================
    Older-version (inactive version) read-only mode
 
    When ``checkVersionStatus`` finds the loaded version is no longer
@@ -197,10 +217,20 @@ body:is(.read-only-version, .role-viewer) .view-mode-hidden {
        Load button stays disabled because the select can't be focused.
 
    Any future "navigation" select / input should be added here rather
-   than to a per-page override. */
-body:is(.read-only-version, .role-viewer) input:not([type="search"]):not([id*="search"]):not([id*="filter"]):not([id*="query"]):not(#domainVersionSelect),
-body:is(.read-only-version, .role-viewer) textarea,
-body:is(.read-only-version, .role-viewer) select:not(#domainVersionSelect):not(#loadDomainSelect):not(#loadVersionSelect) {
+   than to a per-page override.
+
+   The Digital Twin page (``body[data-page="digitaltwin"]``) is excluded
+   wholesale: it is a read / analysis surface (SPARQL/insights, graph
+   exploration + filter/search, data quality, reasoning, cohort
+   discovery) that never edits the domain *design*. Its filter controls
+   are a mix of <select> / checkbox / mixed-case ``sgFilterValue`` inputs
+   that the per-input exemptions above can't reliably catch, and a
+   PUBLISHED/IN-REVIEW domain (now ``read-only-version``) must stay fully
+   queryable. Real mutations are still enforced server-side by
+   ``PermissionMiddleware``. */
+body:is(.read-only-version, .role-viewer):not([data-page="digitaltwin"]) input:not([type="search"]):not([id*="search"]):not([id*="filter"]):not([id*="query"]):not(#domainVersionSelect),
+body:is(.read-only-version, .role-viewer):not([data-page="digitaltwin"]) textarea,
+body:is(.read-only-version, .role-viewer):not([data-page="digitaltwin"]) select:not(#domainVersionSelect):not(#loadDomainSelect):not(#loadVersionSelect) {
     pointer-events: none !important;
     background-color: #e9ecef !important;
     opacity: 0.7 !important;

@@ -32,6 +32,8 @@ from back.objects.registry import (
     invalidate_registry_cache,
     obx_format,
 )
+from back.objects.registry.version_lifecycle import check_status_transition
+from back.objects.domain.version_status import clear_version_status_cache
 from back.objects.session import (
     SessionManager,
     get_domain,
@@ -856,20 +858,67 @@ class SettingsService:
             ) from e
 
     @staticmethod
-    def set_registry_version_active_result(
+    def resolve_domain_role(
+        request,
+        domain_folder: str,
+        settings: Settings,
+        *,
+        app_role: str = "",
+    ) -> str:
+        """Resolve the caller's effective role on *domain_folder*.
+
+        Unlike the session-scoped role on ``request.state.user_domain_role``
+        (which is for the *loaded* domain), this resolves the role for an
+        arbitrary target domain — needed when a Builder manages version
+        status from Registry Browse for a domain they have not loaded.
+        """
+        try:
+            from back.core.helpers import get_databricks_host_and_token
+
+            email = getattr(request.state, "user_email", "") or request.headers.get(
+                "x-forwarded-email", ""
+            )
+            domain = get_domain(SessionManager(request))
+            host, token = get_databricks_host_and_token(domain, settings)
+            user_token = request.headers.get("x-forwarded-access-token", "")
+            registry_cfg = RegistryCfg.from_domain(domain, settings).as_dict()
+            return permission_service.get_domain_role(
+                email,
+                host,
+                token,
+                registry_cfg,
+                settings.ontobricks_app_name,
+                domain_folder,
+                user_token=user_token,
+                app_role=app_role,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "resolve_domain_role(%s) failed: %s", domain_folder, exc
+            )
+            return ""
+
+    @staticmethod
+    def set_registry_version_status_result(
         domain_name: str,
         version: str,
-        enabled: bool,
+        new_status: str,
+        *,
+        user_role: str,
+        user_domain_role: str,
         session_mgr: SessionManager,
         settings: Settings,
     ) -> Dict[str, Any]:
-        """Toggle the *active* (``mcp_enabled``) flag for a specific version.
+        """Transition a version's lifecycle ``status``.
 
-        Works on any domain in the registry — the domain does not need to be
-        loaded in the current session.  Only one version per domain may be
-        active; enabling one automatically disables the others.
+        Works on any domain in the registry — the domain does not need to
+        be loaded in the current session. Enforces the lifecycle state
+        machine (allowed transitions), per-transition role requirements,
+        and the DRAFT→IN-REVIEW precondition (the version must have been
+        built at least once, i.e. ``last_build`` is set).
         """
         try:
+            new_status = (new_status or "").strip().upper()
             domain = get_domain(session_mgr)
             svc = RegistryService.from_context(domain, settings)
             if not svc.cfg.is_configured:
@@ -879,39 +928,50 @@ class SettingsService:
             if version not in sorted_versions:
                 raise NotFoundError(f'Version {version} not found in "{domain_name}"')
 
-            if enabled:
-                for ver in sorted_versions:
-                    if ver == version:
-                        continue
-                    ok, data, _ = svc.read_version(domain_name, ver)
-                    if not ok:
-                        continue
-                    if data.get("info", {}).get("mcp_enabled"):
-                        data["info"]["mcp_enabled"] = False
-                        svc.write_version(domain_name, ver, json.dumps(data))
-
             ok, data, msg = svc.read_version(domain_name, version)
             if not ok:
                 raise InfrastructureError("Failed to read registry version", detail=msg)
 
-            data.setdefault("info", {})["mcp_enabled"] = enabled
-            svc.write_version(domain_name, version, json.dumps(data))
+            info = data.get("info", {})
+            current_status = (info.get("status") or "DRAFT").upper()
+            last_build = info.get("last_build", "") or ""
+
+            check_status_transition(
+                current_status,
+                new_status,
+                user_role=user_role,
+                user_domain_role=user_domain_role,
+                last_build=last_build,
+            )
+
+            ok, set_msg = svc.set_version_status(domain_name, version, new_status)
+            if not ok:
+                raise InfrastructureError(
+                    "Failed to update version status", detail=set_msg
+                )
 
             invalidate_registry_cache()
+            clear_version_status_cache()
 
             if (
                 domain.domain_folder == domain_name
                 and domain.current_version == version
             ):
-                domain.info["mcp_enabled"] = enabled
+                domain.info["status"] = new_status
+                domain.save()
 
-            return {"success": True, "version": version, "active": enabled}
+            return {
+                "success": True,
+                "version": version,
+                "status": new_status,
+                "previous_status": current_status,
+            }
         except OntoBricksError:
             raise
         except Exception as e:
-            logger.exception("Set registry version active failed: %s", e)
+            logger.exception("Set registry version status failed: %s", e)
             raise InfrastructureError(
-                "Set registry version active failed", detail=str(e)
+                "Set registry version status failed", detail=str(e)
             ) from e
 
     @staticmethod

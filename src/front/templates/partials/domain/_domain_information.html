@@ -55,8 +55,10 @@
                                 </small>
                             </div>
                             <div class="col-md-3 mb-3">
-                                <label for="domainVersion" class="form-label">
-                                    <i class="bi bi-hash"></i> Version
+                                <label for="domainVersion" class="form-label d-flex align-items-center gap-2">
+                                    <span><i class="bi bi-hash"></i> Version</span>
+                                    <span class="js-version-status-badge badge border bg-warning-subtle text-dark border-warning"
+                                          style="font-size:0.65rem;">Draft</span>
                                 </label>
                                 <input type="text" class="form-control ob-form-readonly-muted" id="domainVersionDisplay"
                                        value="v{{ domain.version or '1' }}" readonly>

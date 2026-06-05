@@ -339,6 +339,50 @@ document.addEventListener('DOMContentLoaded', function () {
         return html;
     }
 
+    // --- Lifecycle status helpers ---
+
+    // Color map: DRAFT = amber/secondary, IN-REVIEW = blue/info,
+    // PUBLISHED = green/success (Bootstrap ``badge bg-*-subtle``).
+    const STATUS_BADGE = {
+        'DRAFT': { cls: 'bg-warning-subtle text-dark border-warning', icon: 'pencil', label: 'Draft' },
+        'IN-REVIEW': { cls: 'bg-info-subtle text-dark border-info', icon: 'eye', label: 'In Review' },
+        'PUBLISHED': { cls: 'bg-success-subtle text-dark border-success', icon: 'broadcast', label: 'Published' }
+    };
+
+    function statusBadge(status) {
+        const s = (status || 'DRAFT').toUpperCase();
+        const cfg = STATUS_BADGE[s] || STATUS_BADGE['DRAFT'];
+        return '<span class="badge ' + cfg.cls + ' border" style="font-size:.65rem;" ' +
+            'title="Lifecycle status: ' + escapeHtml(cfg.label) + '">' +
+            '<i class="bi bi-' + cfg.icon + ' me-1"></i>' + escapeHtml(cfg.label) + '</span>';
+    }
+
+    // Allowed transitions surfaced as buttons. The server is authoritative
+    // for role + precondition; these only present the valid next states.
+    function statusButtons(domainName, ver, status) {
+        const s = (status || 'DRAFT').toUpperCase();
+        const mk = (to, cls, icon, label, title) =>
+            '<button type="button" class="btn btn-sm ' + cls + ' registry-status-btn" ' +
+            'data-domain="' + escapeHtml(domainName) + '" data-version="' + escapeHtml(ver) + '" ' +
+            'data-status="' + to + '" title="' + escapeHtml(title) + '">' +
+            '<i class="bi bi-' + icon + ' me-1"></i>' + escapeHtml(label) + '</button>';
+        if (s === 'DRAFT') {
+            return mk('IN-REVIEW', 'btn-outline-info', 'eye', 'Submit for Review',
+                'Submit this version for review (requires a successful build)');
+        }
+        if (s === 'IN-REVIEW') {
+            return mk('DRAFT', 'btn-outline-secondary', 'arrow-counterclockwise', 'Back to Draft',
+                'Return this version to Draft (re-enables editing)') +
+                mk('PUBLISHED', 'btn-outline-success', 'broadcast', 'Publish',
+                'Publish this version (exposed on the API/MCP)');
+        }
+        if (s === 'PUBLISHED') {
+            return mk('DRAFT', 'btn-outline-secondary', 'arrow-counterclockwise', 'Unpublish',
+                'Return this version to Draft (admin only)');
+        }
+        return '';
+    }
+
     // --- Registry domain list ---
 
     async function loadRegistryDomains() {
@@ -392,7 +436,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 const versions = d.versions || [];
                 const vCount = versions.length;
                 const hasVersions = vCount > 0;
-                const activeVer = versions.find(v => typeof v === 'object' && v.active);
+                const publishedVer = versions.find(
+                    v => typeof v === 'object' && (v.status || '').toUpperCase() === 'PUBLISHED'
+                );
                 const rowId = 'reg-versions-' + idx;
                 const isCurrent = currentFolder && d.name === currentFolder;
                 const nameLabel = escapeHtml(d.name) +
@@ -403,10 +449,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     : '<button type="button" class="btn btn-sm btn-outline-danger border-0 registry-delete-btn" data-requires-app="admin" ' +
                           'data-domain="' + escapeHtml(d.name) + '" title="Delete domain and all versions">' +
                           '<i class="bi bi-trash"></i></button>';
-                const versionsBadge = activeVer
+                const versionsBadge = publishedVer
                     ? '<span class="badge bg-secondary">' + vCount + '</span> ' +
-                      '<span class="badge bg-success-subtle text-success border-success" style="font-size:0.65rem;" title="Active: v' + escapeHtml(activeVer.version) + '">' +
-                          '<i class="bi bi-broadcast"></i> v' + escapeHtml(activeVer.version) +
+                      '<span class="badge bg-success-subtle text-dark border-success" style="font-size:0.65rem;" title="Published: v' + escapeHtml(publishedVer.version) + '">' +
+                          '<i class="bi bi-broadcast"></i> v' + escapeHtml(publishedVer.version) +
                       '</span>'
                     : '<span class="badge bg-secondary">' + vCount + '</span>';
                 html += '<tr class="registry-domain-row" data-target="' + rowId + '" style="cursor:pointer;">' +
@@ -426,23 +472,16 @@ document.addEventListener('DOMContentLoaded', function () {
                         '<div class="registry-version-list">';
                     d.versions.forEach(v => {
                         const ver = typeof v === 'object' ? v.version : v;
-                        const isActive = typeof v === 'object' && v.active;
+                        const status = (typeof v === 'object' && v.status ? v.status : 'DRAFT').toUpperCase();
                         const lastUpdate = (typeof v === 'object' && v.last_update) ? v.last_update : '';
                         const lastBuild = (typeof v === 'object' && v.last_build) ? v.last_build : '';
                         const isLoaded = currentFolder === d.name && currentVersion === ver;
-                        const activeLabel = isActive
-                            ? '<span class="badge bg-success-subtle text-success border-success" style="font-size:.65rem;"><i class="bi bi-broadcast me-1"></i>Active</span>'
-                            : '';
+                        const statusLabel = statusBadge(status);
                         const loadedLabel = isLoaded
                             ? '<span class="badge bg-primary-subtle text-primary border" style="font-size:.65rem;"><i class="bi bi-check-circle me-1"></i>Loaded</span>'
                             : '';
                         const datesHtml = _formatVersionDates(lastUpdate, lastBuild);
-                        const activeBtn = isActive
-                            ? '<button type="button" class="btn btn-sm btn-success registry-active-version-btn" disabled title="This version is Active">' +
-                                  '<i class="bi bi-broadcast me-1"></i>Active</button>'
-                            : '<button type="button" class="btn btn-sm btn-outline-success registry-active-version-btn" ' +
-                                  'data-domain="' + escapeHtml(d.name) + '" data-version="' + escapeHtml(ver) + '" title="Set as Active version">' +
-                                  '<i class="bi bi-broadcast me-1"></i>Set Active</button>';
+                        const statusBtns = statusButtons(d.name, ver, status);
                         const loadBtn = isLoaded
                             ? ''
                             : '<button type="button" class="btn btn-sm btn-outline-primary registry-load-version-btn" ' +
@@ -456,10 +495,10 @@ document.addEventListener('DOMContentLoaded', function () {
                                   '<i class="bi bi-trash"></i></button>';
                         html += '<div class="registry-version-row d-flex align-items-center gap-2 px-4 py-2' + (isLoaded ? ' registry-version-loaded' : '') + '">' +
                             '<span class="badge ' + (isLoaded ? 'bg-primary' : 'bg-secondary') + ' registry-version-num">v' + escapeHtml(ver) + '</span>' +
-                            '<div class="d-flex align-items-center gap-2">' + activeLabel + loadedLabel + '</div>' +
+                            '<div class="d-flex align-items-center gap-2">' + statusLabel + loadedLabel + '</div>' +
                             datesHtml +
                             '<span class="flex-grow-1"></span>' +
-                            '<div class="d-flex align-items-center gap-1">' + activeBtn + loadBtn + deleteBtn + '</div>' +
+                            '<div class="d-flex align-items-center gap-1">' + statusBtns + loadBtn + deleteBtn + '</div>' +
                         '</div>';
                     });
                     html += '</div></td></tr>';
@@ -505,10 +544,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
             });
 
-            listDiv.querySelectorAll('.registry-active-version-btn:not([disabled])').forEach(btn => {
+            listDiv.querySelectorAll('.registry-status-btn:not([disabled])').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    setRegistryVersionActive(btn.dataset.domain, btn.dataset.version);
+                    setRegistryVersionStatus(btn.dataset.domain, btn.dataset.version, btn.dataset.status);
                 });
             });
 
@@ -604,32 +643,47 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    async function setRegistryVersionActive(domainName, version) {
+    async function setRegistryVersionStatus(domainName, version, newStatus) {
+        const target = (newStatus || '').toUpperCase();
+        const labels = {
+            'DRAFT': 'Draft', 'IN-REVIEW': 'In Review', 'PUBLISHED': 'Published'
+        };
+        const meta = {
+            'IN-REVIEW': { title: 'Submit for Review', confirm: 'Submit', cls: 'btn-info', icon: 'eye',
+                msg: 'Submit <strong>v' + escapeHtml(version) + '</strong> of <strong>' + escapeHtml(domainName) +
+                     '</strong> for review? Editing will be locked until it is returned to Draft.' },
+            'PUBLISHED': { title: 'Publish Version', confirm: 'Publish', cls: 'btn-success', icon: 'broadcast',
+                msg: 'Publish <strong>v' + escapeHtml(version) + '</strong> of <strong>' + escapeHtml(domainName) +
+                     '</strong>? It will be served on the API/MCP surface.' },
+            'DRAFT': { title: 'Return to Draft', confirm: 'Return to Draft', cls: 'btn-secondary', icon: 'arrow-counterclockwise',
+                msg: 'Return <strong>v' + escapeHtml(version) + '</strong> of <strong>' + escapeHtml(domainName) +
+                     '</strong> to Draft? This re-enables editing.' }
+        }[target];
+        if (!meta) return;
+
         const confirmed = await showConfirmDialog({
-            title: 'Set Active Version',
-            message: 'Set <strong>v' + escapeHtml(version) + '</strong> of <strong>' + escapeHtml(domainName) + '</strong> as the Active version? Any previously active version will be deactivated.',
-            confirmText: 'Set Active',
-            confirmClass: 'btn-success',
-            icon: 'broadcast'
+            title: meta.title,
+            message: meta.msg,
+            confirmText: meta.confirm,
+            confirmClass: meta.cls,
+            icon: meta.icon
         });
         if (!confirmed) return;
 
         try {
-            const resp = await fetch(
-                '/settings/registry/domains/' + encodeURIComponent(domainName) + '/versions/' + encodeURIComponent(version) + '/active',
-                {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled: true })
-                }
-            );
+            const resp = await fetch('/domain/set-version-status', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domain_name: domainName, version: version, status: target })
+            });
             const data = await resp.json();
-            if (data.success) {
-                showNotification('v' + version + ' is now Active for ' + domainName, 'success');
+            if (resp.ok && data.success) {
+                showNotification('v' + version + ' is now ' + (labels[target] || target) + ' for ' + domainName, 'success');
+                if (typeof fetchCachedInvalidate === 'function') fetchCachedInvalidate('/navbar/state');
                 loadRegistryDomains();
             } else {
-                showNotification('Error: ' + (data.message || 'Failed to set active'), 'error');
+                showNotification('Error: ' + (data.message || 'Failed to change status'), 'error');
             }
         } catch (e) {
             showNotification('Error: ' + e.message, 'error');

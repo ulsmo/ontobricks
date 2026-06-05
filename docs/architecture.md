@@ -1315,13 +1315,21 @@ All blocking Databricks I/O runs through `run_blocking()` in `DatabricksHelpers.
 
 OntoBricks provides a stateless REST API at `/api/v1/` for external applications to:
 
+> **Version lifecycle & API access.** Each domain version has a lifecycle status
+> — `DRAFT` → `IN-REVIEW` → `PUBLISHED` (transitions enforced server-side in
+> `back.objects.registry.version_lifecycle`). The external REST API, GraphQL
+> (`/api/v1/graphql`) and MCP only serve **PUBLISHED** versions and default to
+> the **numeric-latest PUBLISHED** version. Editing a version is only allowed
+> while it is `DRAFT` (gated in `PermissionMiddleware`). The lifecycle replaces
+> the old per-version "Active"/`mcp_enabled` toggle.
+
 ### Available Endpoints
 
 **Domain API** (`/api/v1/domains`, `/api/v1/domain/...`):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/domains` | GET | List registry domains (MCP-enabled only) |
+| `/api/v1/domains` | GET | List registry domains with ≥1 PUBLISHED version |
 | `/api/v1/domain/versions` | GET | List versions for a named domain |
 | `/api/v1/domain/design-status` | GET | Design status (ontology, metadata, mapping readiness) |
 | `/api/v1/domain/ontology` | GET | Get domain OWL ontology (Turtle) |

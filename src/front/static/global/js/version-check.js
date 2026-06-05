@@ -21,19 +21,63 @@
 // =====================================================
 
 window.isActiveVersion = true;
+// Lifecycle status of the loaded version. Editing is only allowed while
+// the status is DRAFT; IN-REVIEW / PUBLISHED versions are read-only.
+// Defaults to 'DRAFT' so the UI stays editable until the async check runs.
+window.versionStatus = 'DRAFT';
+
+// Lifecycle status → Bootstrap badge classes + label (shared map).
+const VERSION_STATUS_BADGE = {
+    'DRAFT': { cls: 'bg-warning-subtle text-dark border-warning', icon: 'pencil', label: 'Draft' },
+    'IN-REVIEW': { cls: 'bg-info-subtle text-dark border-info', icon: 'eye', label: 'In Review' },
+    'PUBLISHED': { cls: 'bg-success-subtle text-dark border-success', icon: 'broadcast', label: 'Published' }
+};
+
+// Populate every ``.js-version-status-badge`` placeholder with the current
+// lifecycle status. Lets any Jinja template surface the badge by simply
+// dropping ``<span class="js-version-status-badge"></span>`` next to a
+// ``v{{ current_version }}`` header. Status is a controlled enum (safe).
+function renderVersionStatusBadges(status) {
+    const cfg = VERSION_STATUS_BADGE[String(status || 'DRAFT').toUpperCase()]
+        || VERSION_STATUS_BADGE['DRAFT'];
+    document.querySelectorAll('.js-version-status-badge').forEach(el => {
+        el.className = 'js-version-status-badge badge border ' + cfg.cls;
+        el.style.fontSize = el.style.fontSize || '0.65rem';
+        el.innerHTML = '<i class="bi bi-' + cfg.icon + ' me-1"></i>' + cfg.label;
+        el.title = 'Lifecycle status: ' + cfg.label;
+    });
+}
+window.OB = window.OB || {};
+window.OB.renderVersionStatusBadges = renderVersionStatusBadges;
 
 async function checkVersionStatus() {
     try {
         const data = await fetchOnce('/domain/version-status');
         if (data.success) {
             window.isActiveVersion = data.is_active;
-            if (!data.is_active) {
+            window.versionStatus = data.status || 'DRAFT';
+            renderVersionStatusBadges(window.versionStatus);
+
+            const lockedByStatus = window.versionStatus !== 'DRAFT';
+            const readOnly = !data.is_active || lockedByStatus;
+
+            if (lockedByStatus) {
+                document.body.classList.add('read-only-status');
+            }
+
+            if (readOnly) {
+                // Reuse the existing read-only gating (every selector in
+                // permissions.css / ontoviz.css keys off
+                // ``read-only-version``) so a locked status disables the
+                // same write surfaces with no per-rule duplication.
                 document.body.classList.add('read-only-version');
                 if (window.OB && typeof window.OB.annotateRoleNavBadge === 'function') {
-                    window.OB.annotateRoleNavBadge(
-                        'You are viewing an older version of this domain. '
-                        + 'Load the latest version to make changes.'
-                    );
+                    const msg = lockedByStatus
+                        ? 'This version is ' + window.versionStatus
+                          + ' (read-only). Set it back to DRAFT to make changes.'
+                        : 'You are viewing an older version of this domain. '
+                          + 'Load the latest version to make changes.';
+                    window.OB.annotateRoleNavBadge(msg);
                 }
                 if (window.OB && typeof window.OB.installReadOnlyContextMenuBlocker === 'function') {
                     window.OB.installReadOnlyContextMenuBlocker();
@@ -46,5 +90,6 @@ async function checkVersionStatus() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    renderVersionStatusBadges(window.versionStatus);
     checkVersionStatus();
 });

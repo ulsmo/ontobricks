@@ -500,6 +500,10 @@ class LakebaseRegistryStore(RegistryStore):
         # self-heal deployments created before the build-run trace existed
         # (the full DDL only runs from the Settings "Initialize" action).
         self._build_runs_ready = False
+        # Guards the lazy ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS status``
+        # used to self-heal deployments created before the lifecycle status
+        # column existed (same pattern as ``_build_runs_ready``).
+        self._status_column_ready = False
 
     # ------------------------------------------------------------------
     # Identity
@@ -689,6 +693,7 @@ class LakebaseRegistryStore(RegistryStore):
 
     def list_domains_with_metadata(self) -> Tuple[bool, List[DomainSummary], str]:
         try:
+            self._ensure_domain_versions_status_column()
             psycopg, dict_row = _require_psycopg()
             with self._connect() as conn:
                 with conn.cursor(row_factory=dict_row) as cur:
@@ -705,7 +710,7 @@ class LakebaseRegistryStore(RegistryStore):
                 with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(
                         f"""
-                        SELECT v.domain_id, v.version, v.mcp_enabled,
+                        SELECT v.domain_id, v.version, v.mcp_enabled, v.status,
                                v.last_update, v.last_build, v.info, v.ontology
                         FROM {self._q(self._schema)}.domain_versions v
                         JOIN {self._q(self._schema)}.domains d ON d.id = v.domain_id
@@ -741,6 +746,7 @@ class LakebaseRegistryStore(RegistryStore):
                             {
                                 "version": v["version"],
                                 "active": bool(v["mcp_enabled"]),
+                                "status": v["status"] or "DRAFT",
                                 "last_update": v["last_update"] or "",
                                 "last_build": v["last_build"] or "",
                             }
@@ -805,12 +811,13 @@ class LakebaseRegistryStore(RegistryStore):
         self, folder: str, version: str
     ) -> Tuple[bool, Dict[str, Any], str]:
         try:
+            self._ensure_domain_versions_status_column()
             psycopg, dict_row = _require_psycopg()
             with self._connect() as conn, conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
                     f"""
                     SELECT v.info, v.ontology, v.assignment, v.design_layout,
-                           v.metadata, v.version, v.mcp_enabled,
+                           v.metadata, v.version, v.mcp_enabled, v.status,
                            v.last_update, v.last_build
                     FROM {self._q(self._schema)}.domain_versions v
                     JOIN {self._q(self._schema)}.domains d ON d.id = v.domain_id
@@ -823,6 +830,7 @@ class LakebaseRegistryStore(RegistryStore):
                 return False, {}, f"Version {version} not found for domain {folder}"
             info = row["info"] or {}
             info.setdefault("mcp_enabled", bool(row["mcp_enabled"]))
+            info["status"] = row["status"] or "DRAFT"
             if row["last_update"]:
                 info["last_update"] = row["last_update"]
             if row["last_build"]:
@@ -846,6 +854,7 @@ class LakebaseRegistryStore(RegistryStore):
         self, folder: str, version: str, data: Dict[str, Any]
     ) -> Tuple[bool, str]:
         try:
+            self._ensure_domain_versions_status_column()
             info = data.get("info", {}) or {}
             ver_blob = (data.get("versions") or {}).get(version, {}) or {}
             ontology = ver_blob.get("ontology", data.get("ontology", {})) or {}
@@ -853,6 +862,7 @@ class LakebaseRegistryStore(RegistryStore):
             design = ver_blob.get("design_layout", data.get("design_layout", {})) or {}
             metadata = ver_blob.get("metadata", data.get("metadata", {})) or {}
             mcp_enabled = bool(info.get("mcp_enabled"))
+            status = info.get("status") or "DRAFT"
             last_update = info.get("last_update", "") or ""
             last_build = info.get("last_build", "") or ""
             description = info.get("description", "") or ""
@@ -877,10 +887,10 @@ class LakebaseRegistryStore(RegistryStore):
                     f"""
                     INSERT INTO {self._q(self._schema)}.domain_versions
                         (domain_id, version, info, ontology, assignment,
-                         design_layout, metadata, mcp_enabled,
+                         design_layout, metadata, mcp_enabled, status,
                          last_update, last_build)
                     VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
-                            %s::jsonb, %s::jsonb, %s, %s, %s)
+                            %s::jsonb, %s::jsonb, %s, %s, %s, %s)
                     ON CONFLICT (domain_id, version)
                     DO UPDATE SET info          = EXCLUDED.info,
                                   ontology      = EXCLUDED.ontology,
@@ -888,6 +898,7 @@ class LakebaseRegistryStore(RegistryStore):
                                   design_layout = EXCLUDED.design_layout,
                                   metadata      = EXCLUDED.metadata,
                                   mcp_enabled   = EXCLUDED.mcp_enabled,
+                                  status        = EXCLUDED.status,
                                   last_update   = EXCLUDED.last_update,
                                   last_build    = EXCLUDED.last_build,
                                   updated_at    = now()
@@ -901,6 +912,7 @@ class LakebaseRegistryStore(RegistryStore):
                         json.dumps(design),
                         json.dumps(metadata),
                         mcp_enabled,
+                        status,
                         last_update,
                         last_build,
                     ),
@@ -928,6 +940,43 @@ class LakebaseRegistryStore(RegistryStore):
             invalidate_registry_cache(self.cache_key)
             return True, ""
         except Exception as exc:  # noqa: BLE001
+            return False, str(exc)
+
+    def update_version_status(
+        self, folder: str, version: str, status: str
+    ) -> Tuple[bool, str]:
+        """Set the lifecycle ``status`` of a single (domain, version).
+
+        Targeted single-row UPDATE so a status transition never rewrites
+        the full version document. Also mirrors ``status`` into the
+        version ``info`` blob so cached reads stay consistent.
+        """
+        try:
+            self._ensure_domain_versions_status_column()
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {self._q(self._schema)}.domain_versions v
+                    SET status = %s,
+                        info = jsonb_set(v.info, '{{status}}', to_jsonb(%s::text)),
+                        updated_at = now()
+                    FROM {self._q(self._schema)}.domains d
+                    WHERE v.domain_id = d.id
+                      AND d.registry_id = %s AND d.folder = %s
+                      AND v.version = %s
+                    """,
+                    (status, status, self._registry(), folder, version),
+                )
+                if cur.rowcount == 0:
+                    return False, (
+                        f"Version {version} not found for domain {folder}"
+                    )
+            invalidate_registry_cache(self.cache_key)
+            return True, ""
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "update_version_status failed for %s/%s", folder, version
+            )
             return False, str(exc)
 
     # ------------------------------------------------------------------
@@ -1139,6 +1188,44 @@ class LakebaseRegistryStore(RegistryStore):
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("append_schedule_history(%s) failed: %s", folder, exc)
+
+    # ------------------------------------------------------------------
+    # Lifecycle status column (self-heal)
+    # ------------------------------------------------------------------
+
+    def _ensure_domain_versions_status_column(self) -> bool:
+        """Lazily add ``domain_versions.status`` (+ index) if missing.
+
+        Self-heals deployments created before the lifecycle status column
+        existed: the full DDL only runs from the Settings *Initialize*
+        action. Idempotent (``ADD COLUMN IF NOT EXISTS`` /
+        ``CREATE INDEX IF NOT EXISTS``) and guarded by a per-instance flag
+        so we only pay the round-trip once per store. Best-effort: on
+        failure it logs and returns ``False`` so callers can no-op.
+        """
+        if self._status_column_ready:
+            return True
+        try:
+            sch = self._q(self._schema)
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    ALTER TABLE {sch}.domain_versions
+                        ADD COLUMN IF NOT EXISTS status text NOT NULL
+                        DEFAULT 'DRAFT'
+                    """
+                )
+                cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS idx_domain_versions_status
+                        ON {sch}.domain_versions(domain_id, status)
+                    """
+                )
+            self._status_column_ready = True
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("could not ensure domain_versions.status column: %s", exc)
+            return False
 
     # ------------------------------------------------------------------
     # Build-run trace (analytics)

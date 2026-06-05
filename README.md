@@ -163,8 +163,9 @@ git push origin main --tags
 ### Domain & registry (0.1.2 UX)
 
 - **Ontology Designer** — the main ontology graph view lives under **Ontology → Designer** (visual canvas + AI Assistant).
-- **Domain Cockpit (Validation)** — **Active Version** shows which registry version is exposed via **API / MCP**; it can differ from the version you have loaded in the editor.
-- **Registry → Browse** — only place to **set the Active (API/MCP) version** for a domain; **Domain → Versions** shows that status as a read-only badge.
+- **Version lifecycle (DRAFT / IN-REVIEW / PUBLISHED)** — every domain version carries a lifecycle status, shown as a colour-coded badge across the navbar, Domain Information, Registry Browse, Domain Versions and query headers. Only **DRAFT** versions are editable; the external API/GraphQL/MCP only serve the **numeric-latest PUBLISHED** version. Transitions (DRAFT ↔ IN-REVIEW → PUBLISHED, PUBLISHED → DRAFT admin-only) are enforced server-side and replace the former "Active"/`mcp_enabled` toggle.
+- **Domain Cockpit (Validation)** — **Published Version** shows which registry version is exposed via **API / MCP**; it can differ from the version you have loaded in the editor.
+- **Registry → Browse** — drives the **lifecycle status transitions** for a domain's versions; **Domain → Versions** shows that status as a read-only badge.
 - **New domain** — after **New Domain**, a full-page loading overlay runs until Domain Information finishes its first load.
 - **Domain Information** — triple-store / snapshot / local graph paths update when you **commit** the domain name (blur or change) or change version (aligned with naming rules before save).
 - **Duplicate names** — **Save to Unity Catalog** is blocked if the sanitized domain name already exists in the registry (inline check + confirmation before POST).

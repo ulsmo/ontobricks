@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS domain_versions (
     metadata        jsonb NOT NULL DEFAULT '{}'::jsonb,
     -- Hot fields denormalised from ``info`` for cheap listing queries.
     mcp_enabled     boolean NOT NULL DEFAULT false,
+    -- Lifecycle status gating editability and API access.
+    status          text NOT NULL DEFAULT 'DRAFT'
+                    CHECK (status IN ('DRAFT', 'IN-REVIEW', 'PUBLISHED')),
     last_update     text NOT NULL DEFAULT '',
     last_build      text NOT NULL DEFAULT '',
     created_at      timestamptz NOT NULL DEFAULT now(),
@@ -77,6 +80,8 @@ CREATE INDEX IF NOT EXISTS idx_domain_versions_domain
     ON domain_versions(domain_id);
 CREATE INDEX IF NOT EXISTS idx_domain_versions_mcp
     ON domain_versions(domain_id) WHERE mcp_enabled;
+CREATE INDEX IF NOT EXISTS idx_domain_versions_status
+    ON domain_versions(domain_id, status);
 
 -- ----------------------------------------------------------------
 -- Domain-level permissions (Viewer / Editor / Builder per principal)

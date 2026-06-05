@@ -32,7 +32,7 @@ from back.objects.session import (
     get_session_manager,
     sanitize_domain_folder,
 )
-from back.objects.domain import Domain
+from back.objects.domain import Domain, SettingsService
 from api.routers.internal._permissions import filter_visible_domains
 
 logger = get_logger(__name__)
@@ -507,25 +507,40 @@ async def list_build_runs(
     return p.list_build_runs_result(p.build_registry_service(), version=version, limit=limit)
 
 
-@router.post("/set-version-mcp")
-async def set_version_mcp(
+@router.post("/set-version-status")
+async def set_version_status(
     request: Request,
     session_mgr: SessionManager = Depends(get_session_manager),
     settings: Settings = Depends(get_settings),
 ):
-    """Toggle the API/MCP flag for a specific version (only one may be active).
+    """Transition a version's lifecycle status (DRAFT / IN-REVIEW / PUBLISHED).
 
-    In the web UI, operators change this from **Registry → Browse**; this
-    endpoint remains for integrations and tests that POST JSON directly.
+    Body: ``{domain_name, version, status}``. ``domain_name`` is the target
+    domain (may differ from the loaded session domain — e.g. from Registry
+    Browse). Authorization is resolved against the *target* domain: the
+    state machine and per-transition role tiers are enforced server-side
+    by :meth:`SettingsService.set_registry_version_status_result`.
     """
     data = await request.json()
-    version = data.get("version")
-    enabled = bool(data.get("enabled", False))
-    if not version:
-        raise ValidationError("version is required")
-    domain = get_domain(session_mgr)
-    p = Domain(domain, settings)
-    return p.set_version_mcp(p.build_registry_service(), version, enabled)
+    domain_name = (data.get("domain_name") or "").strip()
+    version = (data.get("version") or "").strip()
+    new_status = (data.get("status") or "").strip()
+    if not domain_name or not version or not new_status:
+        raise ValidationError("domain_name, version and status are required")
+
+    user_role = getattr(request.state, "user_role", "") or ""
+    domain_role = SettingsService.resolve_domain_role(
+        request, domain_name, settings, app_role=user_role
+    )
+    return SettingsService.set_registry_version_status_result(
+        domain_name,
+        version,
+        new_status,
+        user_role=user_role,
+        user_domain_role=domain_role,
+        session_mgr=session_mgr,
+        settings=settings,
+    )
 
 
 # ===========================================

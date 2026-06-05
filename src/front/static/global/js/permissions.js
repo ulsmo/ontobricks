@@ -266,6 +266,11 @@
      */
     function canEditOntology() {
         if (window.isActiveVersion === false) return false;
+        // Editing is only allowed while the loaded version is DRAFT.
+        // ``window.versionStatus`` defaults to 'DRAFT' until
+        // ``version-check.js`` resolves it, so this stays permissive
+        // until the async check runs (mirrors ``isActiveVersion``).
+        if (window.versionStatus && window.versionStatus !== 'DRAFT') return false;
         return permissions.hasDomainRole('editor');
     }
 

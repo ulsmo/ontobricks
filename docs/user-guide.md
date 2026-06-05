@@ -677,7 +677,18 @@ When you save an existing domain:
 
 ### Domain Cockpit (Validation)
 
-Under **Domain → Validation** (Cockpit), tiles summarise registry and build readiness. The **Active Version** tile shows which registry version is currently **exposed via API and MCP** (the “MCP-enabled” version). That can differ from the version you have **loaded** in the editor; when it does, the tile adds a *(not loaded)* hint. This is **not** the same as “you are on the latest writable version” — read-only UI for ontology/mapping is still driven by whether the loaded version is the **latest** on disk (see **Version status** below).
+Under **Domain → Validation** (Cockpit), tiles summarise registry and build readiness. The **Published Version** tile shows which registry version is currently **exposed via API and MCP** — the numeric-latest version whose lifecycle status is **PUBLISHED**. That can differ from the version you have **loaded** in the editor; when it does, the tile adds a *(not loaded)* hint.
+
+#### Version lifecycle (DRAFT / IN-REVIEW / PUBLISHED)
+
+Every domain version carries a **lifecycle status**, shown as a colour-coded badge wherever the domain + version appears (navbar, Domain → Information, Registry → Browse, Domain → Versions, and the query headers):
+
+- **DRAFT** (amber) — editable. New versions always start here.
+- **IN-REVIEW** (blue) — locked for editing, pending review. Requires a successful build first.
+- **PUBLISHED** (green) — locked for editing and served on the API/MCP.
+
+Transitions are made from **Registry → Browse** (or Domain → Information):
+DRAFT → IN-REVIEW → PUBLISHED (admin or builder), IN-REVIEW → DRAFT (admin or builder), and PUBLISHED → DRAFT (admin only). While a version is **not DRAFT**, the ontology/mapping editors, metadata/document writes, and the Build/sync action are read-only — set it back to **DRAFT** to make changes.
 
 ### Version Management (Domain → Versions)
 
@@ -828,7 +839,7 @@ OntoBricks includes an MCP server that exposes knowledge-graph tools to LLM clie
 
 | Tool | Description |
 |------|-------------|
-| `list_domains` | List all MCP-enabled domains in the registry |
+| `list_domains` | List all domains with ≥1 PUBLISHED version in the registry |
 | `select_domain` | Activate a domain for subsequent queries |
 | `list_domain_versions` | List registry versions for a domain |
 | `get_design_status` | Ontology / metadata / assignment readiness for a domain |

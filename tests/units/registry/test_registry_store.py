@@ -110,6 +110,15 @@ class _InMemoryStore(RegistryStore):
         self._versions.pop((folder, version), None)
         return True, "ok"
 
+    def update_version_status(
+        self, folder: str, version: str, status: str
+    ) -> Tuple[bool, str]:
+        data = self._versions.get((folder, version))
+        if data is None:
+            return False, f"missing {folder}/{version}"
+        data.setdefault("info", {})["status"] = status
+        return True, "ok"
+
     def load_domain_permissions(self, folder: str) -> Dict[str, Any]:
         return dict(self._perms.get(folder, {"version": 1, "permissions": []}))
 
@@ -309,6 +318,19 @@ class TestStoreContract:
         store.delete_version("a", "1")
         ok, versions, _ = store.list_versions("a")
         assert ok and versions == ["2"]
+
+    def test_update_version_status_round_trip(self, store):
+        store.write_version("demo", "1", {"info": {"name": "demo"}})
+        ok, msg = store.update_version_status("demo", "1", "IN-REVIEW")
+        assert ok, msg
+        ok, got, _ = store.read_version("demo", "1")
+        assert ok
+        assert got["info"]["status"] == "IN-REVIEW"
+
+    def test_update_version_status_unknown_version(self, store):
+        ok, msg = store.update_version_status("ghost", "9", "PUBLISHED")
+        assert ok is False
+        assert msg
 
     def test_permissions_default_shape(self, store):
         out = store.load_domain_permissions("nobody")

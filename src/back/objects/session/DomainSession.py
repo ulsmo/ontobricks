@@ -67,6 +67,7 @@ def get_empty_domain() -> Dict[str, Any]:
                 "author": "",
                 "llm_endpoint": "",
                 "mcp_enabled": False,
+                "status": "DRAFT",
             },
             "triplestore": {
                 "stats": {},
@@ -1268,6 +1269,7 @@ class DomainSession:
             "author": self._data["domain"]["info"].get("author", ""),
             "llm_endpoint": self._data["domain"]["info"].get("llm_endpoint", ""),
             "mcp_enabled": self._data["domain"]["info"].get("mcp_enabled", False),
+            "status": self._data["domain"]["info"].get("status", "DRAFT"),
             "last_update": self._data["domain"].get("last_update", ""),
             "last_build": self._data["domain"].get("last_build", ""),
         }
@@ -1363,6 +1365,7 @@ class DomainSession:
             self._data["domain"]["info"]["author"] = info.get("author", "")
             self._data["domain"]["info"]["llm_endpoint"] = info.get("llm_endpoint", "")
             self._data["domain"]["info"]["mcp_enabled"] = info.get("mcp_enabled", False)
+            self._data["domain"]["info"]["status"] = info.get("status", "DRAFT")
             self._data["domain"]["last_update"] = info.get("last_update", "")
             self._data["domain"]["last_build"] = info.get("last_build", "")
             ts = self._data["domain"].setdefault(

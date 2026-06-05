@@ -173,10 +173,14 @@ App, authenticates with an M2M OAuth token, and uses `httpx.AsyncClient`. It
 | `query_graphql` | `POST /graphql/{domain}` | **GraphQL** | Resolvers → SPARQL → **Spark SQL** |
 | `ontobricks://*` resources | various | REST / GraphQL | Same as the equivalent tools |
 
-> **Note.** MCP only sees **published** domain versions because `/api/v1/...`
-> requires a registry version. To query an unsaved working session, use the
-> Graph Chat (next section), which talks to the session-aware `/dtwin/...`
-> internal routes instead.
+> **Note.** MCP and the external REST/GraphQL API only see versions whose
+> lifecycle status is **PUBLISHED** — they default to the numeric-latest
+> PUBLISHED version and reject explicit requests for `DRAFT`/`IN-REVIEW`
+> versions. A version becomes servable by transitioning it
+> DRAFT → IN-REVIEW → PUBLISHED from **Registry → Browse** (this replaces the
+> former "Active"/`mcp_enabled` toggle). To query an unsaved working session,
+> use the Graph Chat (next section), which talks to the session-aware
+> `/dtwin/...` internal routes instead.
 
 ---
 

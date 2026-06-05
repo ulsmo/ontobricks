@@ -154,6 +154,7 @@ class Domain:
             "base_uri_auto": self._s.ontology.get("base_uri_auto", None),
             "llm_endpoint": self._s.info.get("llm_endpoint", ""),
             "mcp_enabled": self._s.info.get("mcp_enabled", False),
+            "status": self._s.info.get("status", "DRAFT"),
             "view_table": view_table,
             "graph_name": graph_name,
         }
@@ -573,6 +574,7 @@ class Domain:
                             "version": ver,
                             "description": "",
                             "mcp_enabled": False,
+                            "status": "DRAFT",
                             "is_active": ver == latest,
                             "is_current": ver == self._s.current_version,
                             "error": _msg,
@@ -586,6 +588,7 @@ class Domain:
                         "version": ver,
                         "description": info.get("description", ""),
                         "mcp_enabled": info.get("mcp_enabled", False),
+                        "status": info.get("status", "DRAFT"),
                         "author": info.get("author", ""),
                         "last_update": info.get("last_update", ""),
                         "is_active": ver == latest,
@@ -607,58 +610,6 @@ class Domain:
                 "List version details failed", detail=str(e)
             ) from e
 
-    def set_version_mcp(
-        self, svc: RegistryService, version: str, enabled: bool
-    ) -> Dict[str, Any]:
-        """Toggle the ``mcp_enabled`` flag for a single version.
-
-        Only one version may have ``mcp_enabled=True`` at a time.  When
-        *enabled* is ``True`` any other version that currently has the flag
-        is updated to ``False`` first.
-        """
-        try:
-            folder = self._s.uc_domain_folder
-            if not folder:
-                raise ValidationError("Domain not saved to registry")
-
-            sorted_versions = svc.list_versions_sorted(folder)
-            if version not in sorted_versions:
-                raise NotFoundError(f"Version {version} not found")
-
-            if enabled:
-                for ver in sorted_versions:
-                    if ver == version:
-                        continue
-                    ok, data, _ = svc.read_version(folder, ver)
-                    if not ok:
-                        continue
-                    info = data.get("info", {})
-                    if info.get("mcp_enabled"):
-                        info["mcp_enabled"] = False
-                        data["info"] = info
-                        svc.write_version(folder, ver, json.dumps(data))
-
-            ok, data, msg = svc.read_version(folder, version)
-            if not ok:
-                if msg and "not found" in msg.lower():
-                    raise NotFoundError(msg)
-                raise InfrastructureError(
-                    "Failed to read domain version from registry", detail=msg
-                )
-
-            data.setdefault("info", {})["mcp_enabled"] = enabled
-            svc.write_version(folder, version, json.dumps(data))
-
-            if version == self._s.current_version:
-                self._s.info["mcp_enabled"] = enabled
-
-            return {"success": True, "version": version, "mcp_enabled": enabled}
-        except OntoBricksError:
-            raise
-        except Exception as e:
-            logger.exception("set_version_mcp failed: %s", e)
-            raise InfrastructureError("set_version_mcp failed", detail=str(e)) from e
-
     def save_domain_to_uc(self, svc: RegistryService) -> Dict[str, Any]:
         """Save domain into the registry Volume under /domains/<name>/V{ver}/V{ver}.json."""
         try:
@@ -674,6 +625,11 @@ class Domain:
                 )
             version = self._s.current_version or "1"
             export_data = self._s.export_for_save()
+            # A brand-new domain always starts as DRAFT; an overwrite of an
+            # existing version preserves whatever status the session carries.
+            if is_new_domain:
+                export_data.setdefault("info", {})["status"] = "DRAFT"
+                self._s.info["status"] = "DRAFT"
             content = json.dumps(export_data, indent=2)
             ok, message = svc.write_version(folder, version, content)
 
@@ -827,7 +783,11 @@ class Domain:
             parts = current_version.split(".")
             new_version = str(int(parts[0]) + 1) if parts else "2"
             self._s.current_version = new_version
+            # New versions always start their lifecycle as DRAFT, regardless
+            # of the status of the version they were branched from.
+            self._s.info["status"] = "DRAFT"
             export_data = self._s.export_for_save()
+            export_data.setdefault("info", {})["status"] = "DRAFT"
             exported_entities = len(
                 export_data.get("versions", {})
                 .get(new_version, {})
@@ -930,12 +890,15 @@ class Domain:
             # is exposed separately via ``active_version`` so the Cockpit
             # tile can show what's actually live on the API/MCP surface.
             is_active = is_latest
+            status = self._s.info.get("status", "DRAFT")
             result = {
                 "success": True,
                 "version": version,
                 "is_active": is_active,
                 "is_latest": is_latest,
                 "active_version": active_version,
+                "published_version": active_version,
+                "status": status,
                 "available_versions": available_versions,
                 "has_registry": has_registry,
                 "registry": (

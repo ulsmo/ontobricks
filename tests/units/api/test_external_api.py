@@ -243,6 +243,15 @@ class TestDomainVersions:
         mock_dt.uc_from_domain.return_value = MagicMock()
         svc = MagicMock()
         svc.list_versions_sorted.return_value = ["3", "2", "1"]
+
+        # Each version carries a lifecycle status; the endpoint reads it
+        # per version to annotate the response.
+        statuses = {"3": "PUBLISHED", "2": "IN-REVIEW", "1": "DRAFT"}
+        svc.read_version.side_effect = lambda dom, ver: (
+            True,
+            {"info": {"status": statuses[ver]}},
+            "",
+        )
         mock_svc_cls.return_value = svc
         response = client.get(
             f"/api/v1/domain/versions?domain_name=mydom{self._REG_QS}"
@@ -253,6 +262,10 @@ class TestDomainVersions:
         assert data["latest_version"] == "3"
         assert len(data["versions"]) == 3
         assert data["versions"][0]["is_latest"] is True
+        assert data["versions"][0]["status"] == "PUBLISHED"
+        assert data["versions"][0]["is_published"] is True
+        assert data["versions"][2]["status"] == "DRAFT"
+        assert data["versions"][2]["is_published"] is False
 
 
 # =========================================================================

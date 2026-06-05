@@ -811,32 +811,59 @@ class RegistryService:
             return False, {}, latest, msg
         return True, data, latest, ""
 
-    def find_mcp_version(self, folder: str) -> Tuple[Optional[str], dict]:
-        """Find the version with ``mcp_enabled=True`` for *folder*.
+    def find_published_version(self, folder: str) -> Tuple[Optional[str], dict]:
+        """Find the numeric-latest ``PUBLISHED`` version for *folder*.
+
+        The API/MCP surface serves the highest-numbered version whose
+        lifecycle ``status`` is ``PUBLISHED``. Multiple PUBLISHED versions
+        may coexist; this returns the most recent one.
 
         Returns ``(version_str, data_dict)`` or ``(None, {})`` when no
-        version has the flag set.
+        version is PUBLISHED.
         """
         for ver in self.list_versions_sorted(folder):
             ok, data, _ = self.read_version(folder, ver)
             if not ok:
                 continue
-            if data.get("info", {}).get("mcp_enabled"):
+            if data.get("info", {}).get("status") == "PUBLISHED":
                 return ver, data
         return None, {}
 
-    def load_mcp_domain_data(self, folder: str) -> Tuple[bool, dict, str, str]:
-        """Load the MCP-enabled version for *folder*.
+    # Backwards-compatible alias. The old "MCP-enabled" flag has been
+    # replaced by the lifecycle ``status``; "the MCP version" now means
+    # "the latest PUBLISHED version".
+    def find_mcp_version(self, folder: str) -> Tuple[Optional[str], dict]:
+        return self.find_published_version(folder)
 
-        Falls back to the latest version when no version has
-        ``mcp_enabled`` set.
+    def load_published_domain_data(
+        self, folder: str
+    ) -> Tuple[bool, dict, str, str]:
+        """Load the numeric-latest PUBLISHED version for *folder*.
+
+        Unlike :meth:`load_latest_domain_data` there is **no fallback** to
+        a non-PUBLISHED version — the API/MCP surface only serves data for
+        PUBLISHED versions.
 
         Returns ``(ok, data_dict, version_str, error_msg)``.
         """
-        ver, data = self.find_mcp_version(folder)
+        ver, data = self.find_published_version(folder)
         if ver:
             return True, data, ver, ""
-        return self.load_latest_domain_data(folder)
+        return (
+            False,
+            {},
+            "",
+            f'No PUBLISHED version available for domain "{folder}"',
+        )
+
+    def set_version_status(
+        self, folder: str, version: str, status: str
+    ) -> Tuple[bool, str]:
+        """Set the lifecycle ``status`` of a single (domain, version)."""
+        ok, msg = self._store.update_version_status(folder, version, status)
+        if ok:
+            invalidate_registry_cache(self.cache_key)
+        return ok, msg
 
     # -- document operations -------------------------------------------
 

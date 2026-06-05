@@ -287,26 +287,6 @@ async def delete_registry_version(
     )
 
 
-@router.post("/registry/domains/{domain_name}/versions/{version}/active")
-async def set_registry_version_active(
-    domain_name: str,
-    version: str,
-    request: Request,
-    session_mgr: SessionManager = Depends(get_session_manager),
-    settings: Settings = Depends(get_settings),
-):
-    """Set or clear the Active flag on a version in the registry."""
-    data = await request.json()
-    enabled = bool(data.get("enabled", False))
-    return config_service.set_registry_version_active_result(
-        domain_name,
-        version,
-        enabled,
-        session_mgr,
-        settings,
-    )
-
-
 # ===========================================
 # Registry OBX export / import
 # ===========================================

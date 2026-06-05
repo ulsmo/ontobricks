@@ -2949,13 +2949,16 @@ class DigitalTwin:
                 if "not found" in msg.lower():
                     raise NotFoundError(msg)
                 raise InfrastructureError(msg)
+            if data.get("info", {}).get("status") != "PUBLISHED":
+                raise ValidationError(
+                    f"Version {domain_version} of domain '{domain_name}' is not "
+                    f"PUBLISHED; the API only serves PUBLISHED versions"
+                )
             version = domain_version
         else:
-            ok, data, version, err = svc.load_mcp_domain_data(domain_name)
+            ok, data, version, err = svc.load_published_domain_data(domain_name)
             if not ok:
-                if "not found" in err.lower() or "no versions" in err.lower():
-                    raise NotFoundError(err)
-                raise InfrastructureError(err)
+                raise NotFoundError(err)
         domain.clear_generated_content()
         domain.import_from_file(data, version=version)
         domain.domain_folder = domain_name

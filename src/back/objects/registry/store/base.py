@@ -167,6 +167,14 @@ class RegistryStore(ABC):
     @abstractmethod
     def delete_version(self, folder: str, version: str) -> Tuple[bool, str]: ...
 
+    @abstractmethod
+    def update_version_status(
+        self, folder: str, version: str, status: str
+    ) -> Tuple[bool, str]:
+        """Set the lifecycle ``status`` (DRAFT / IN-REVIEW / PUBLISHED) of
+        a single (domain, version) without rewriting the full document.
+        """
+
     # ------------------------------------------------------------------
     # Domain-level permissions
     # ------------------------------------------------------------------
