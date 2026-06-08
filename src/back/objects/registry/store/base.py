@@ -44,6 +44,7 @@ class DomainSummary(TypedDict, total=False):
     name: str
     base_uri: str
     description: str
+    review_quorum: int       # per-domain sign-off quorum (>= 1)
     versions: List[Dict[str, Any]]
 
 
@@ -158,6 +159,14 @@ class RegistryStore(ABC):
 
     @abstractmethod
     def domain_exists(self, folder: str) -> bool: ...
+
+    @abstractmethod
+    def get_domain_quorum(self, folder: str) -> int:
+        """Return the per-domain review sign-off quorum (always >= 1).
+
+        Defaults to ``1`` for domains that predate the setting or when the
+        backend cannot resolve it. Must NOT raise.
+        """
 
     @abstractmethod
     def delete_domain(self, folder: str) -> List[str]:

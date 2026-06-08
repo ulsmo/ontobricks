@@ -176,7 +176,13 @@
         if (a.can_request_changes) {
             buttons.push(btn('request_changes', 'btn-outline-danger', 'arrow-counterclockwise', 'Request changes'));
         }
-        if (a.can_publish) {
+        if (a.can_publish && d.publish_override) {
+            buttons.push('<div class="alert alert-warning small mb-2 py-2">' +
+                '<i class="bi bi-shield-exclamation me-1"></i>' +
+                'Admin override: only ' + d.approvals + ' of ' + d.quorum +
+                ' sign-off(s) collected. Publishing will bypass the quorum.</div>');
+            buttons.push(btn('publish', 'btn-warning', 'broadcast', 'Publish (override quorum)'));
+        } else if (a.can_publish) {
             buttons.push(btn('publish', 'btn-success', 'broadcast', 'Publish'));
         }
         if (d.status === 'IN-REVIEW' && !a.can_publish && d.actions && !d.quorum_met) {

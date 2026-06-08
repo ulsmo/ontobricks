@@ -709,10 +709,13 @@ review workflow that collects reviewer sign-offs and keeps a durable audit trail
   - **Audit trail** — a timeline of every decision (submitted, approved, changes requested,
     published, reopened) with the actor, timestamp, comment, and the `from → to` status
     snapshot for lifecycle transitions.
-- **Roles & quorum** — Submit and Publish stay builder/admin. **Publish** unlocks only once
-  the configured **sign-off quorum** is reached (registry global-config key `review_quorum`,
-  default `1`). **Sign-off** (approve / request changes) is open to any principal with a role
-  on the domain; **request changes** sends the version back to DRAFT for editing. **Reopen**
+- **Roles & quorum** — Submit and Publish stay builder/admin. **Publish** unlocks for a
+  builder only once the **sign-off quorum** is reached; an **admin** (app-level or domain-level)
+  may **publish at any time, overriding the quorum** (the override is flagged in the audit
+  trail). The quorum is a **per-domain** setting (default `1`), configured on
+  **Domain → Information → Global** ("Sign-off quorum") and applied to every version of that
+  domain. **Sign-off** (approve / request changes) is open to any principal with a role on the
+  domain; **request changes** sends the version back to DRAFT for editing. **Reopen**
   (PUBLISHED → DRAFT) is admin-only.
 - **Persistence** — every decision is stored append-only in the `domain_review_events`
   registry table, so the full "who validated what, when" history survives restarts and is

@@ -415,6 +415,7 @@ async function saveDomainInfoBeforeSave() {
     const nameEl = document.getElementById('domainName');
     const descEl = document.getElementById('domainDescription');
     const authorEl = document.getElementById('domainAuthor');
+    const quorumEl = document.getElementById('domainReviewQuorum');
     const baseUriEl = document.getElementById('domainBaseUri');
     const llmEndpointEl = document.getElementById('domainLlmEndpoint');
     const versionEl = document.getElementById('domainVersionSelect');
@@ -428,6 +429,7 @@ async function saveDomainInfoBeforeSave() {
             base_uri: baseUriEl ? baseUriEl.value.trim() : undefined,
             base_uri_auto: (typeof _baseUriAutoMode !== 'undefined') ? _baseUriAutoMode : undefined,
             llm_endpoint: llmEndpointEl ? llmEndpointEl.value : undefined,
+            review_quorum: quorumEl ? Math.max(1, parseInt(quorumEl.value, 10) || 1) : undefined,
             version: versionEl ? versionEl.value : undefined,
         };
         

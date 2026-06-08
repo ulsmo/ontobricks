@@ -53,7 +53,7 @@
                     '</div>';
                 return;
             }
-            render(data.tasks || [], data.quorum || 1);
+            render(data.tasks || []);
             loaded = true;
         } catch (err) {
             console.error('loadTasks error:', err);
@@ -64,7 +64,7 @@
         }
     }
 
-    function render(tasks, quorum) {
+    function render(tasks) {
         const container = document.getElementById('myTasksContainer');
         if (!container) return;
 

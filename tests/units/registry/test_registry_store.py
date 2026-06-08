@@ -82,6 +82,13 @@ class _InMemoryStore(RegistryStore):
     def domain_exists(self, folder: str) -> bool:
         return any(f == folder for (f, _) in self._versions.keys())
 
+    def get_domain_quorum(self, folder: str) -> int:
+        for (f, v), data in self._versions.items():
+            if f == folder:
+                info = data.get("info", {}) or {}
+                return max(1, int(info.get("review_quorum") or 1))
+        return 1
+
     def delete_domain(self, folder: str) -> List[str]:
         for key in [k for k in self._versions if k[0] == folder]:
             self._versions.pop(key, None)

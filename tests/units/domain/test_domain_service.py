@@ -93,6 +93,27 @@ class TestSaveDomainInfo:
         Domain(domain).save_domain_info({"base_uri": "http://new.org#"})
         assert domain.ontology["base_uri"] == "http://new.org#"
 
+    def test_save_review_quorum(self):
+        domain = _mock_domain()
+        result = Domain(domain).save_domain_info({"review_quorum": 3})
+        assert domain.info["review_quorum"] == 3
+        assert result["review_quorum"] == 3
+
+    def test_review_quorum_clamped_to_minimum_one(self):
+        domain = _mock_domain()
+        Domain(domain).save_domain_info({"review_quorum": 0})
+        assert domain.info["review_quorum"] == 1
+
+    def test_review_quorum_invalid_falls_back_to_one(self):
+        domain = _mock_domain()
+        Domain(domain).save_domain_info({"review_quorum": "abc"})
+        assert domain.info["review_quorum"] == 1
+
+    def test_review_quorum_defaults_when_absent(self):
+        domain = _mock_domain()
+        result = Domain(domain).get_domain_info()
+        assert result["info"]["review_quorum"] == 1
+
 
 class TestGetDomainTemplateData:
     def test_returns_fields(self):

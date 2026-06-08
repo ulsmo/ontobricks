@@ -67,7 +67,6 @@ ACTION_COMMENTED = "commented"
 DECISION_APPROVE = "approve"
 DECISION_REQUEST_CHANGES = "request_changes"
 
-_QUORUM_KEY = "review_quorum"
 _DEFAULT_QUORUM = 1
 
 
@@ -87,16 +86,16 @@ class ReviewService:
         """Cross-domain worklist of versions with a pending action for the
         current user.
 
-        Returns ``{success, quorum, tasks: [...]}`` where each task is a
+        Returns ``{success, tasks: [...]}`` where each task is a
         ``(domain, version, status, approvals, required, actions)`` row.
+        ``required`` is the per-domain sign-off quorum.
         """
         try:
             domain = get_domain(session_mgr)
             svc = RegistryService.from_context(domain, settings)
             if not svc.cfg.is_configured:
-                return {"success": True, "quorum": _DEFAULT_QUORUM, "tasks": []}
+                return {"success": True, "tasks": []}
 
-            quorum = ReviewService._quorum(svc)
             email = ReviewService._email(request)
             app_role = getattr(request.state, "user_role", "") or ""
 
@@ -123,6 +122,7 @@ class ReviewService:
                 role = roles.get(folder, ROLE_NONE)
                 if role_level(role) <= 0:
                     continue
+                quorum = max(1, int(d.get("review_quorum") or _DEFAULT_QUORUM))
                 for v in d.get("versions", []) or []:
                     version = v.get("version", "")
                     status = (v.get("status") or STATUS_DRAFT).upper()
@@ -151,7 +151,7 @@ class ReviewService:
             # Newest activity first; versions never reviewed (no activity)
             # sort to the bottom.
             tasks.sort(key=lambda t: t["last_activity"] or "", reverse=True)
-            return {"success": True, "quorum": quorum, "tasks": tasks}
+            return {"success": True, "tasks": tasks}
         except OntoBricksError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -176,7 +176,7 @@ class ReviewService:
             svc, info = ReviewService._load(session_mgr, settings, folder, version)
             status = (info.get("status") or STATUS_DRAFT).upper()
             last_build = info.get("last_build", "") or ""
-            quorum = ReviewService._quorum(svc)
+            quorum = ReviewService._quorum(svc, folder)
             events = svc.list_review_events(folder, version)
             summary = ReviewService._summarize(events)
             email = ReviewService._email(request)
@@ -185,6 +185,7 @@ class ReviewService:
                 or role_level(user_domain_role) >= role_level(ROLE_VIEWER)
             )
             is_builder = ReviewService._is_builder(user_role, user_domain_role)
+            is_admin = ReviewService._is_admin(user_role, user_domain_role)
             already = email.lower() in {a.lower() for a in summary["approvers"]}
             quorum_met = summary["approvals"] >= quorum
 
@@ -198,6 +199,9 @@ class ReviewService:
                 "approvals": summary["approvals"],
                 "approvers": summary["approvers"],
                 "quorum_met": quorum_met,
+                "publish_override": (
+                    status == STATUS_IN_REVIEW and is_admin and not quorum_met
+                ),
                 "already_approved": already,
                 "events": events,
                 "actions": {
@@ -217,7 +221,9 @@ class ReviewService:
                         status == STATUS_IN_REVIEW and is_member
                     ),
                     "can_publish": (
-                        status == STATUS_IN_REVIEW and is_builder and quorum_met
+                        status == STATUS_IN_REVIEW
+                        and is_builder
+                        and (quorum_met or is_admin)
                     ),
                     "can_reopen": (
                         status == STATUS_PUBLISHED and user_role == ROLE_ADMIN
@@ -369,7 +375,11 @@ class ReviewService:
         user_role: str,
         user_domain_role: str,
     ) -> Dict[str, Any]:
-        """Publish an IN-REVIEW version once the sign-off quorum is met."""
+        """Publish an IN-REVIEW version once the sign-off quorum is met.
+
+        Admins (app-level or domain-level) may publish regardless of the
+        quorum; the override is recorded in the audit event meta.
+        """
         svc, info = ReviewService._load(session_mgr, settings, folder, version)
         status = (info.get("status") or STATUS_DRAFT).upper()
         if not ReviewService._is_builder(user_role, user_domain_role):
@@ -379,9 +389,11 @@ class ReviewService:
         if status != STATUS_IN_REVIEW:
             raise ConflictError(f"Version is {status}, expected IN-REVIEW")
 
-        quorum = ReviewService._quorum(svc)
+        quorum = ReviewService._quorum(svc, folder)
         summary = ReviewService._summarize(svc.list_review_events(folder, version))
-        if summary["approvals"] < quorum:
+        is_admin = ReviewService._is_admin(user_role, user_domain_role)
+        quorum_override = is_admin and summary["approvals"] < quorum
+        if summary["approvals"] < quorum and not is_admin:
             raise ConflictError(
                 f"Cannot publish: {summary['approvals']} of {quorum} "
                 f"required sign-offs collected"
@@ -398,7 +410,11 @@ class ReviewService:
             from_status=STATUS_IN_REVIEW,
             to_status=STATUS_PUBLISHED,
             comment=comment,
-            meta={"approvals": summary["approvals"], "quorum": quorum},
+            meta={
+                "approvals": summary["approvals"],
+                "quorum": quorum,
+                "quorum_override": quorum_override,
+            },
         )
         return ReviewService.review_detail(
             request,
@@ -512,10 +528,10 @@ class ReviewService:
             logger.debug("session status sync skipped: %s", exc)
 
     @staticmethod
-    def _quorum(svc: RegistryService) -> int:
+    def _quorum(svc: RegistryService, folder: str) -> int:
+        """Per-domain review sign-off quorum (>= 1)."""
         try:
-            raw = svc.store.load_global_config().get(_QUORUM_KEY, _DEFAULT_QUORUM)
-            return max(1, int(raw))
+            return max(1, int(svc.store.get_domain_quorum(folder)))
         except Exception:  # noqa: BLE001
             return _DEFAULT_QUORUM
 
@@ -535,6 +551,13 @@ class ReviewService:
             ROLE_BUILDER,
             ROLE_ADMIN,
         )
+
+    @staticmethod
+    def _is_admin(user_role: str, user_domain_role: str) -> bool:
+        """An admin (app-level or domain-level) may drive any lifecycle
+        transition, including publishing regardless of the sign-off quorum.
+        """
+        return user_role == ROLE_ADMIN or user_domain_role == ROLE_ADMIN
 
     @staticmethod
     def _group_events(
@@ -594,6 +617,7 @@ class ReviewService:
         """Actionable items for the My Tasks worklist (only pending ones)."""
         actions: List[Dict[str, str]] = []
         is_builder = role in ("builder", ROLE_ADMIN)
+        is_admin = role == ROLE_ADMIN
         is_member = role_level(role) >= role_level(ROLE_VIEWER)
         already = email.lower() in {a.lower() for a in summary["approvers"]}
 
@@ -603,7 +627,9 @@ class ReviewService:
         elif status == STATUS_IN_REVIEW:
             if is_member and not already:
                 actions.append({"id": "review", "label": "Review & sign off"})
-            if is_builder and summary["approvals"] >= quorum:
+            # Builders publish once quorum is met; admins may override the
+            # quorum and publish at any time.
+            if is_builder and (summary["approvals"] >= quorum or is_admin):
                 actions.append({"id": "publish", "label": "Publish"})
         return actions
 

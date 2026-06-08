@@ -155,6 +155,7 @@ class Domain:
             "llm_endpoint": self._s.info.get("llm_endpoint", ""),
             "mcp_enabled": self._s.info.get("mcp_enabled", False),
             "status": self._s.info.get("status", "DRAFT"),
+            "review_quorum": self._s.info.get("review_quorum", 1),
             "view_table": view_table,
             "graph_name": graph_name,
         }
@@ -265,6 +266,12 @@ class Domain:
                 "mcp_enabled": data.get(
                     "mcp_enabled", self._s.info.get("mcp_enabled", False)
                 ),
+                "review_quorum": self._coerce_quorum(
+                    data.get(
+                        "review_quorum",
+                        self._s.info.get("review_quorum", 1),
+                    )
+                ),
             }
         )
 
@@ -293,7 +300,16 @@ class Domain:
             "base_uri_auto": self._s.ontology.get("base_uri_auto", None),
             "llm_endpoint": self._s.info.get("llm_endpoint", ""),
             "mcp_enabled": self._s.info.get("mcp_enabled", False),
+            "review_quorum": self._s.info.get("review_quorum", 1),
         }
+
+    @staticmethod
+    def _coerce_quorum(raw: Any) -> int:
+        """Normalise a quorum value to an integer >= 1."""
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            return 1
 
     def get_domain_template_data(self) -> Dict[str, Any]:
         """Get project data for template rendering.
@@ -316,6 +332,7 @@ class Domain:
             "author": self._s.info.get("author", ""),
             "llm_endpoint": self._s.info.get("llm_endpoint", ""),
             "mcp_enabled": self._s.info.get("mcp_enabled", False),
+            "review_quorum": self._s.info.get("review_quorum", 1),
             "delta": delta,
             "has_ontology": len(self._s.get_classes()) > 0,
             "has_mapping": len(self._s.get_entity_mappings()) > 0,

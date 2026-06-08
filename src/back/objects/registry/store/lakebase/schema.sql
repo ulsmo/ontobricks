@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS domains (
     folder          text NOT NULL,
     description     text NOT NULL DEFAULT '',
     base_uri        text NOT NULL DEFAULT '',
+    -- Per-domain review sign-off quorum: how many distinct approvals are
+    -- required before an IN-REVIEW version can be published. Always >= 1.
+    review_quorum   integer NOT NULL DEFAULT 1
+                    CHECK (review_quorum >= 1),
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now(),
     UNIQUE (registry_id, folder)

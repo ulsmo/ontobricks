@@ -68,6 +68,7 @@ def get_empty_domain() -> Dict[str, Any]:
                 "llm_endpoint": "",
                 "mcp_enabled": False,
                 "status": "DRAFT",
+                "review_quorum": 1,
             },
             "triplestore": {
                 "stats": {},
@@ -1270,6 +1271,9 @@ class DomainSession:
             "llm_endpoint": self._data["domain"]["info"].get("llm_endpoint", ""),
             "mcp_enabled": self._data["domain"]["info"].get("mcp_enabled", False),
             "status": self._data["domain"]["info"].get("status", "DRAFT"),
+            "review_quorum": max(
+                1, int(self._data["domain"]["info"].get("review_quorum") or 1)
+            ),
             "last_update": self._data["domain"].get("last_update", ""),
             "last_build": self._data["domain"].get("last_build", ""),
         }
@@ -1366,6 +1370,9 @@ class DomainSession:
             self._data["domain"]["info"]["llm_endpoint"] = info.get("llm_endpoint", "")
             self._data["domain"]["info"]["mcp_enabled"] = info.get("mcp_enabled", False)
             self._data["domain"]["info"]["status"] = info.get("status", "DRAFT")
+            self._data["domain"]["info"]["review_quorum"] = max(
+                1, int(info.get("review_quorum") or 1)
+            )
             self._data["domain"]["last_update"] = info.get("last_update", "")
             self._data["domain"]["last_build"] = info.get("last_build", "")
             ts = self._data["domain"].setdefault(

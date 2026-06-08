@@ -223,3 +223,102 @@ filter by version, defaulting to the current version.
 
 **Test result**: `pytest tests/units --ignore=tests/property` -> 2283 passed, 11 skipped.
 `node --check` clean on both JS files.
+
+---
+
+## Per-domain review sign-off quorum
+
+**Context**: The review **sign-off quorum** (how many distinct approvals are required before an
+IN-REVIEW version can be published) was a single registry-wide value stored in `global_config`
+under `review_quorum`, with no UI to change it. It should instead be a **per-domain** policy,
+set when a domain is created and editable on the Domain Information / Global page. Decision:
+store it as a typed column on the `domains` table (domain-scoped, one value for all versions),
+default `1`; no backfill of the old global key (it becomes dead).
+
+**Changes**:
+1. `src/back/objects/registry/store/lakebase/schema.sql` — added `review_quorum integer NOT NULL
+   DEFAULT 1 CHECK (review_quorum >= 1)` to the `domains` table.
+2. `src/back/objects/registry/store/lakebase/store.py` — new `_ensure_domains_review_quorum_column()`
+   lazy self-heal migration (mirrors the `status` column pattern); `get_domain_quorum(folder)`;
+   `read_version` now returns `info.review_quorum`; `write_version` persists the column from
+   `info.review_quorum` in the `domains` UPSERT; `list_domains_with_metadata` returns
+   `review_quorum` per domain.
+3. `src/back/objects/registry/store/base.py` — added abstract `get_domain_quorum(folder)` and
+   `review_quorum` to the `DomainSummary` TypedDict.
+4. `src/back/objects/registry/ReviewService.py` — `_quorum(svc, folder)` now reads the per-domain
+   value (`store.get_domain_quorum`); `my_tasks` resolves quorum per-domain from the domain list
+   and no longer returns a single top-level `quorum`; `review_detail`/`publish` pass the folder;
+   removed the dead `_QUORUM_KEY` global-config constant.
+5. `src/back/objects/session/DomainSession.py` — `get_empty_domain`, `export_for_save`, and
+   `import_from_file` now carry `review_quorum` (default 1, clamped >= 1).
+6. `src/back/objects/domain/Domain.py` — `save_domain_info` accepts/clamps `review_quorum`
+   (new `_coerce_quorum` helper); `get_domain_info` and `get_domain_template_data` expose it.
+7. `src/front/templates/partials/domain/_domain_information.html` — new "Sign-off quorum" number
+   input on the Global tab.
+8. `src/front/static/domain/js/domain.js` — `loadDomainInfo`/`saveDomainInfo` load and send
+   `review_quorum`.
+9. `src/front/static/global/js/navbar.js` — `saveDomainInfoBeforeSave` includes `review_quorum`
+   so it persists to the registry on save-to-uc.
+10. `src/front/static/registry/js/registry-my-tasks.js` — dropped the now-unused global `quorum`
+    render argument (each task already carries its own `required`).
+11. `tests/units/registry/test_review_service.py` — mock `store.get_domain_quorum` instead of
+    `load_global_config`.
+12. `tests/units/registry/test_registry_store.py` — `_InMemoryStore.get_domain_quorum`.
+13. `tests/units/domain/test_domain_service.py` — quorum save/clamp/default tests.
+14. `README.md`, `docs/user-guide.md` — quorum documented as per-domain (Domain → Information →
+    Global).
+
+**Modified files**:
+- `src/back/objects/registry/store/lakebase/schema.sql`
+- `src/back/objects/registry/store/lakebase/store.py`
+- `src/back/objects/registry/store/base.py`
+- `src/back/objects/registry/ReviewService.py`
+- `src/back/objects/session/DomainSession.py`
+- `src/back/objects/domain/Domain.py`
+- `src/front/templates/partials/domain/_domain_information.html`
+- `src/front/static/domain/js/domain.js`
+- `src/front/static/global/js/navbar.js`
+- `src/front/static/registry/js/registry-my-tasks.js`
+- `tests/units/registry/test_review_service.py`
+- `tests/units/registry/test_registry_store.py`
+- `tests/units/domain/test_domain_service.py`
+- `README.md`
+- `docs/user-guide.md`
+
+**Test result**: `pytest tests/units` -> 2242 passed, 15 skipped.
+
+**Migration note**: existing Lakebase deployments self-heal the new column on first read/write
+(`ADD COLUMN IF NOT EXISTS`, owner-aware); if the app SP lacks table ownership, run
+`make bootstrap-lakebase` as the schema owner. The old registry-wide `review_quorum` in
+`global_config` is no longer read.
+
+---
+
+## Admin can publish regardless of the sign-off quorum
+
+**Context**: Publishing an IN-REVIEW version was gated by the sign-off quorum for everyone,
+including admins. Admins should be able to drive any lifecycle transition — including publish —
+without being blocked by the quorum, so a domain is never stuck waiting on sign-offs.
+
+**Changes**:
+1. `src/back/objects/registry/ReviewService.py` — new `_is_admin(user_role, user_domain_role)`
+   helper (app-level OR domain-level admin). `publish` now bypasses the quorum check for admins
+   and records `quorum_override` in the `published` event meta. `review_detail` returns
+   `can_publish` for admins even when the quorum is not met, plus a top-level `publish_override`
+   flag. `_pending_actions` (My Tasks) surfaces the Publish action for admins below quorum.
+2. `src/front/static/domain/js/domain-review.js` — when `publish_override` is set, the Validation
+   panel shows an "Admin override" warning and a `Publish (override quorum)` button.
+3. `tests/units/registry/test_review_service.py` — `test_publish_blocked_until_quorum` now uses a
+   non-admin builder; added `test_publish_admin_overrides_quorum`,
+   `test_publish_domain_admin_overrides_quorum`, `test_pending_actions_builder_no_publish_below_quorum`,
+   `test_pending_actions_admin_publish_below_quorum`, `test_review_detail_admin_can_publish_below_quorum`.
+4. `README.md`, `docs/user-guide.md` — documented the admin quorum override.
+
+**Modified files**:
+- `src/back/objects/registry/ReviewService.py`
+- `src/front/static/domain/js/domain-review.js`
+- `tests/units/registry/test_review_service.py`
+- `README.md`
+- `docs/user-guide.md`
+
+**Test result**: `pytest tests/units` -> 2247 passed, 15 skipped. `node --check` clean.

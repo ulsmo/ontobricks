@@ -51,7 +51,7 @@ def _make_svc(*, status="DRAFT", last_build="2026-01-01", quorum=1,
     svc.cfg.is_configured = configured
     svc.list_versions_sorted.return_value = list(versions)
     svc.read_version.return_value = (True, {"info": info}, "")
-    svc.store.load_global_config.return_value = {"review_quorum": quorum}
+    svc.store.get_domain_quorum.return_value = quorum
 
     def _set_status(folder, version, new_status):
         info["status"] = new_status
@@ -200,10 +200,30 @@ def test_signoff_bad_decision_rejected():
 
 
 def test_publish_blocked_until_quorum():
+    # A non-admin builder is gated by the quorum.
     svc, _, _ = _make_svc(status="IN-REVIEW", quorum=2)
     with pytest.raises(ConflictError):
-        _call("publish", svc, comment="", user_role=ROLE_ADMIN,
-              user_domain_role=ROLE_NONE)
+        _call("publish", svc, comment="", user_role="",
+              user_domain_role=ROLE_BUILDER)
+
+
+def test_publish_admin_overrides_quorum():
+    # An admin may publish even when the quorum is not met.
+    svc, info, events = _make_svc(status="IN-REVIEW", quorum=3)
+    result = _call("publish", svc, comment="override",
+                   user_role=ROLE_ADMIN, user_domain_role=ROLE_NONE)
+    assert result["status"] == "PUBLISHED"
+    assert info["status"] == "PUBLISHED"
+    assert events[-1]["action"] == ACTION_PUBLISHED
+    assert events[-1]["meta"]["quorum_override"] is True
+
+
+def test_publish_domain_admin_overrides_quorum():
+    svc, info, _ = _make_svc(status="IN-REVIEW", quorum=2)
+    result = _call("publish", svc, comment="override",
+                   user_role="", user_domain_role=ROLE_ADMIN)
+    assert result["status"] == "PUBLISHED"
+    assert info["status"] == "PUBLISHED"
 
 
 def test_publish_succeeds_when_quorum_met():
@@ -335,6 +355,29 @@ def test_pending_actions_already_approved_member_has_no_review():
         "IN-REVIEW", ROLE_VIEWER, "a@a.com",
         {"approvers": ["a@a.com"], "approvals": 1}, 2, "2026-01-01")
     assert actions == []
+
+
+def test_pending_actions_builder_no_publish_below_quorum():
+    actions = ReviewService._pending_actions(
+        "IN-REVIEW", ROLE_BUILDER, "a@a.com",
+        {"approvers": [], "approvals": 0}, 2, "2026-01-01")
+    assert "publish" not in [a["id"] for a in actions]
+
+
+def test_pending_actions_admin_publish_below_quorum():
+    actions = ReviewService._pending_actions(
+        "IN-REVIEW", ROLE_ADMIN, "a@a.com",
+        {"approvers": [], "approvals": 0}, 3, "2026-01-01")
+    assert "publish" in [a["id"] for a in actions]
+
+
+def test_review_detail_admin_can_publish_below_quorum():
+    svc, _, _ = _make_svc(status="IN-REVIEW", quorum=3)
+    result = _call("review_detail", svc,
+                   user_role=ROLE_ADMIN, user_domain_role=ROLE_NONE)
+    assert result["actions"]["can_publish"] is True
+    assert result["publish_override"] is True
+    assert result["quorum_met"] is False
 
 
 # ----------------------------------------------------------------------
