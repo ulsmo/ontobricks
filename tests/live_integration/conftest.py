@@ -17,14 +17,14 @@ The bearer token is minted from the active Databricks CLI profile via
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import time
 from typing import Optional
 
 import httpx
 import pytest
+
+from tests.fixtures.databricks_auth import DatabricksAuth
 
 
 # ── Skip-the-whole-module gate ────────────────────────────────────────────────
@@ -38,14 +38,23 @@ def _mcp_base() -> Optional[str]:
     return os.environ.get("ONTOBRICKS_LIVE_MCP_BASE") or None
 
 
-# Applied at module collection time so the suite is invisible to normal CI.
-collect_ignore_glob: list[str] = []
-if not _live_base():
-    # Mark the whole package to skip — pytest still collects so the user sees
-    # the reason, but no test runs.
-    pytestmark = pytest.mark.skip(
+def pytest_collection_modifyitems(config, items):
+    """Skip the whole suite unless ``ONTOBRICKS_LIVE_BASE`` is set.
+
+    A module-level ``pytestmark`` in a *conftest* is NOT honoured by pytest, so
+    the skip must be applied via this collection hook. This is what actually
+    keeps the suite out of normal (``pytest tests/``) runs and stops the
+    fixture-less probes (e.g. ``test_root_redirects_when_unauthenticated``,
+    which reads the env var directly) from erroring when the base is unset.
+    """
+    if _live_base():
+        return
+    skip = pytest.mark.skip(
         reason="ONTOBRICKS_LIVE_BASE not set; live integration suite skipped"
     )
+    for item in items:
+        if "tests/live_integration/" in str(item.path).replace("\\", "/"):
+            item.add_marker(skip)
 
 
 # ── Session-scoped fixtures ──────────────────────────────────────────────────
@@ -72,20 +81,12 @@ def bearer_token() -> str:
     so each developer/CI run can target a different workspace by setting
     that one env var.
     """
-    profile = os.environ.get("DATABRICKS_CONFIG_PROFILE")
-    cmd = ["databricks", "auth", "token"]
-    if profile:
-        cmd += ["--profile", profile]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30, check=True
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        pytest.skip(f"databricks auth token failed: {exc}")
-    payload = json.loads(result.stdout)
-    token = payload.get("access_token")
+    token = DatabricksAuth.mint_token(os.environ.get("DATABRICKS_CONFIG_PROFILE"))
     if not token:
-        pytest.skip("databricks auth token returned no access_token")
+        pytest.skip(
+            "databricks auth token failed or returned no access_token "
+            "(check the CLI is installed and DATABRICKS_CONFIG_PROFILE is logged in)"
+        )
     return token
 
 

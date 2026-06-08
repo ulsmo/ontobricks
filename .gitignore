@@ -80,3 +80,9 @@ mlartifacts/
 cookies*.txt
 *.cookiejar
 tests/e2e/_e2e_server.log
+
+
+.claude/
+.understand-anything/
+
+
