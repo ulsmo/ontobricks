@@ -9,6 +9,60 @@
 
 let _runsLoaded = false;
 let _runsCache = [];
+let _runsVersionSel = '';  // '' = all versions
+
+function _populateRunsVersions(versions, current) {
+    const sel = document.getElementById('runsVersionFilter');
+    if (!sel) return;
+    _runsVersionSel = (current && versions.indexOf(current) !== -1) ? current : '';
+    sel.innerHTML = '<option value="">All versions</option>' +
+        versions.map(function (v) {
+            return '<option value="' + _esc(v) + '"' + (v === _runsVersionSel ? ' selected' : '') +
+                '>v' + _esc(v) + (v === current ? ' (current)' : '') + '</option>';
+        }).join('');
+    sel.value = _runsVersionSel;
+    if (!sel.dataset.wired) {
+        sel.addEventListener('change', function (e) {
+            _runsVersionSel = e.target.value;
+            _renderRunsTable();
+        });
+        sel.dataset.wired = '1';
+    }
+}
+
+function _renderRunsTable() {
+    const empty = document.getElementById('runsEmpty');
+    const wrapper = document.getElementById('runsTableWrapper');
+    const tbody = document.getElementById('runsTableBody');
+    if (!tbody) return;
+
+    const rows = _runsVersionSel
+        ? _runsCache.filter(function (r) { return String(r.version == null ? '' : r.version) === _runsVersionSel; })
+        : _runsCache.slice();
+
+    if (rows.length === 0) {
+        wrapper.style.display = 'none';
+        empty.style.display = '';
+        return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = '';
+    rows.forEach(function (run) {
+        const idx = _runsCache.indexOf(run);
+        const row = document.createElement('tr');
+        row.innerHTML =
+            '<td class="text-end text-muted small">' + _esc(run.id || (idx + 1)) + '</td>'
+            + '<td class="small">' + _fmtTs(run.started_at) + '</td>'
+            + '<td class="text-center"><span class="badge bg-secondary">v' + _esc(run.version || '?') + '</span></td>'
+            + '<td class="text-center">' + _statusBadge(run.status) + '</td>'
+            + '<td class="text-end">' + _esc((Number(run.triple_count) || 0).toLocaleString()) + '</td>'
+            + '<td class="text-center">'
+            + '<button class="btn btn-sm btn-outline-primary" onclick="showRunDetails(' + idx + ')" title="View run details">'
+            + '<i class="bi bi-eye"></i></button></td>';
+        tbody.appendChild(row);
+    });
+    wrapper.style.display = '';
+}
 
 function _esc(s) {
     if (typeof escapeHtml === 'function') return escapeHtml(s == null ? '' : String(s));
@@ -79,28 +133,14 @@ async function loadDomainRuns() {
         }
 
         _runsCache = data.runs || [];
+        _populateRunsVersions(data.versions || [], data.current_version || '');
 
         if (_runsCache.length === 0) {
             empty.style.display = '';
             return;
         }
 
-        tbody.innerHTML = '';
-        _runsCache.forEach(function (run, idx) {
-            const row = document.createElement('tr');
-            row.innerHTML =
-                '<td class="text-end text-muted small">' + _esc(run.id || (idx + 1)) + '</td>'
-                + '<td class="small">' + _fmtTs(run.started_at) + '</td>'
-                + '<td class="text-center"><span class="badge bg-secondary">v' + _esc(run.version || '?') + '</span></td>'
-                + '<td class="text-center">' + _statusBadge(run.status) + '</td>'
-                + '<td class="text-end">' + _esc((Number(run.triple_count) || 0).toLocaleString()) + '</td>'
-                + '<td class="text-center">'
-                + '<button class="btn btn-sm btn-outline-primary" onclick="showRunDetails(' + idx + ')" title="View run details">'
-                + '<i class="bi bi-eye"></i></button></td>';
-            tbody.appendChild(row);
-        });
-
-        wrapper.style.display = '';
+        _renderRunsTable();
         _runsLoaded = true;
     } catch (err) {
         loading.style.display = 'none';

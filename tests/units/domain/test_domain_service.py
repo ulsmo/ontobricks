@@ -104,11 +104,12 @@ class TestGetDomainTemplateData:
 
 
 class TestAuditTrail:
-    def _svc(self, events, runs, configured=True):
+    def _svc(self, events, runs, configured=True, versions=("2", "1")):
         svc = MagicMock()
         svc.cfg.is_configured = configured
         svc.list_review_events.return_value = events
         svc.load_build_runs.return_value = runs
+        svc.list_versions_sorted.return_value = list(versions)
         return svc
 
     def test_merges_review_events_and_build_runs(self):
@@ -123,6 +124,16 @@ class TestAuditTrail:
         assert result["domain_folder"] == "test_domain"
         assert result["events"] == events
         assert result["runs"] == runs
+
+    def test_returns_versions_for_dropdown(self):
+        domain = _mock_domain()
+        domain.uc_domain_folder = "test_domain"
+        domain.current_version = "2"
+        result = Domain(domain).audit_trail_result(
+            self._svc([], [], versions=("2", "1"))
+        )
+        assert result["versions"] == ["2", "1"]
+        assert result["current_version"] == "2"
 
     def test_passes_folder_and_limit_to_store(self):
         domain = _mock_domain()

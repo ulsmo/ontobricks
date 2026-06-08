@@ -7,6 +7,10 @@
             <p class="text-muted mb-0 small">Build history recorded for this domain (newest first)</p>
         </div>
         <div class="d-flex align-items-center gap-2">
+            <select class="form-select form-select-sm" id="runsVersionFilter"
+                    style="width:auto;" title="Filter by version" aria-label="Filter by version">
+                <option value="">All versions</option>
+            </select>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="btnReloadRuns"
                     onclick="loadDomainRuns()" title="Reload build runs from the registry">
                 <i class="bi bi-arrow-counterclockwise me-1"></i> Refresh

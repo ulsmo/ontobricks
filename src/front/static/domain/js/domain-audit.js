@@ -21,8 +21,9 @@
         commented: { icon: 'chat-left-text', cls: 'text-muted', label: 'Comment' },
     };
 
-    let _cache = { events: [], runs: [] };
+    let _cache = { events: [], runs: [], versions: [], current: '' };
     let _filter = 'all';
+    let _version = '';  // '' = all versions
 
     window.loadDomainAudit = loadAudit;
 
@@ -36,7 +37,23 @@
                 renderTimeline();
             });
         });
+        document.getElementById('auditVersionFilter')?.addEventListener('change', (e) => {
+            _version = e.target.value;
+            renderTimeline();
+        });
     });
+
+    function populateVersions(versions, current) {
+        const sel = document.getElementById('auditVersionFilter');
+        if (!sel) return;
+        // Default the dropdown to the current version (if any), else "All".
+        _version = (current && versions.indexOf(current) !== -1) ? current : '';
+        sel.innerHTML = '<option value="">All versions</option>' +
+            versions.map((v) => '<option value="' + esc(v) + '"' +
+                (v === _version ? ' selected' : '') + '>v' + esc(v) +
+                (v === current ? ' (current)' : '') + '</option>').join('');
+        sel.value = _version;
+    }
 
     function esc(s) {
         if (typeof window.escapeHtml === 'function') return window.escapeHtml(s == null ? '' : String(s));
@@ -77,7 +94,13 @@
                     esc(data.message || 'Failed to load audit trail') + '</div>';
                 return;
             }
-            _cache = { events: data.events || [], runs: data.runs || [] };
+            _cache = {
+                events: data.events || [],
+                runs: data.runs || [],
+                versions: data.versions || [],
+                current: data.current_version || '',
+            };
+            populateVersions(_cache.versions, _cache.current);
             renderTimeline();
         } catch (err) {
             body.innerHTML = '<div class="alert alert-danger small mb-0">Network error: ' +
@@ -85,15 +108,25 @@
         }
     }
 
+    function matchesVersion(v) {
+        return _version === '' || String(v == null ? '' : v) === _version;
+    }
+
     function buildItems() {
         const items = [];
         if (_filter !== 'build') {
-            _cache.events.forEach((e) => items.push({ kind: 'review', ts: e.created_at, raw: e }));
+            _cache.events.forEach((e) => {
+                if (matchesVersion(e.version)) {
+                    items.push({ kind: 'review', ts: e.created_at, raw: e });
+                }
+            });
         }
         if (_filter !== 'review') {
-            _cache.runs.forEach((r, i) => items.push({
-                kind: 'build', ts: r.started_at || r.finished_at, raw: r, idx: i,
-            }));
+            _cache.runs.forEach((r, i) => {
+                if (matchesVersion(r.version)) {
+                    items.push({ kind: 'build', ts: r.started_at || r.finished_at, raw: r, idx: i });
+                }
+            });
         }
         items.sort((a, b) => tsVal(b.ts) - tsVal(a.ts));
         return items;

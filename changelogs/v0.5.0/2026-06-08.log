@@ -58,3 +58,48 @@ naive slash-fixing.
 - `uv run pytest tests/live_integration/ -m live_integration --no-cov` (base set) — 17 passed.
 - `uv run pytest tests/e2e/` (local mode, navigation) — 18 passed (no regression).
 - `ONTOBRICKS_LIVE_BASE=… uv run pytest tests/e2e/ --no-cov` (live mode, full) — 247 passed, 11 skipped, 0 failed.
+
+---
+
+## Review comments, Domain Audit trail, and version dropdown filter
+
+**Context**: Extend the validation/review workflow with per-transition comments, a unified
+domain Audit trail, and a version filter on both Audit and Runs.
+
+**Changes**:
+1. Review comments — `src/front/static/global/js/review-modals.js` + `review-modals.css` (new,
+   loaded globally via `base.html`): `ReviewModals.promptComment` collects a comment on every
+   status switch (submit/approve/request-changes/publish/reopen, persisted to
+   `domain_review_events`), and `ReviewModals.showComments` renders the full thread as a chat
+   popup. Wired into `domain-review.js`, `registry-my-tasks.js`, `home-tasks.js` (per-row chat
+   button). Removed the bespoke sign-off modal from `_domain_review.html`.
+2. Domain → Audit trail (new Domain menu under Management): `Domain.audit_trail_result` +
+   `GET /domain/audit-trail` merge review events (status + comments) and build runs into one
+   newest-first timeline. New `_domain_audit.html`, `domain-audit.js`, `domain-audit.css`;
+   build entries reuse the run-details popup via `window.showRunDetailsObj` (refactored out of
+   `domain-runs.js`). Run-details modal moved to page level in `domain.html` (fixes a frozen-screen
+   bug when opened from a hidden section).
+3. Version dropdown — `Domain.audit_trail_result` and `list_build_runs_result` now return
+   `versions` + `current_version`; `_domain_audit.html` / `_domain_runs.html` gained a `<select>`
+   version filter (defaults to current version, with an "All versions" option) filtered
+   client-side in `domain-audit.js` / `domain-runs.js`.
+4. Deploy DDL — added `domain_review_events` to the idempotent owner-run migration block in
+   `scripts/bootstrap-lakebase-perms.sh` (run by `scripts/deploy.sh` on every Lakebase deploy).
+
+**Modified/new files**:
+- `src/back/objects/registry/` (store base/lakebase, `RegistryService`, new `ReviewService`),
+  `src/api/routers/internal/review.py`, `src/api/routers/internal/domain.py`,
+  `src/back/objects/domain/Domain.py`
+- `src/front/config/menu_config.json`, `src/front/templates/{base,domain}.html`,
+  `partials/domain/{_domain_review,_domain_audit,_domain_runs}.html`
+- `src/front/static/global/js/review-modals.js`, `global/css/review-modals.css`,
+  `domain/js/{domain,domain-review,domain-audit,domain-runs}.js`,
+  `domain/css/{domain-review,domain-audit}.css`,
+  `registry/js/registry-my-tasks.js`, `home/js/home-tasks.js`
+- `scripts/bootstrap-lakebase-perms.sh`
+- tests: `tests/units/registry/test_review_service.py`, `tests/units/domain/test_domain_service.py`,
+  `tests/units/api/{test_ui_rendering,test_review_endpoints}.py`
+
+**Test result**: `pytest tests/units --ignore=tests/property` -> 2283 passed, 11 skipped.
+`node --check` clean on all touched JS. Deployed via `make deploy` (both apps RUNNING; migration
+logged `domain_review_events` created).

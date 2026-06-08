@@ -415,6 +415,8 @@ class Domain:
                 "success": True,
                 "domain_folder": folder,
                 "version": version,
+                "current_version": self._s.current_version,
+                "versions": svc.list_versions_sorted(folder),
                 "runs": runs,
             }
         except OntoBricksError:
@@ -436,8 +438,9 @@ class Domain:
         Merges two registry streams so the frontend can interleave them
         into one timeline: review/validation decisions (status switches
         with their comments) and the build-run history (runs + results).
-        Both are returned raw and newest-first-friendly; the UI sorts and
-        filters the combined stream client-side.
+        Both streams (plus the available ``versions`` list) are returned
+        raw; the UI sorts and filters by version client-side, defaulting
+        the version dropdown to ``current_version``.
         """
         try:
             if not svc.cfg.is_configured:
@@ -449,6 +452,7 @@ class Domain:
                 "success": True,
                 "domain_folder": folder,
                 "current_version": self._s.current_version,
+                "versions": svc.list_versions_sorted(folder),
                 "events": svc.list_review_events(folder),
                 "runs": svc.load_build_runs(folder, limit=limit),
             }

@@ -9,6 +9,10 @@
             </p>
         </div>
         <div class="d-flex align-items-center gap-2">
+            <select class="form-select form-select-sm" id="auditVersionFilter"
+                    style="width:auto;" title="Filter by version" aria-label="Filter by version">
+                <option value="">All versions</option>
+            </select>
             <div class="btn-group btn-group-sm" role="group" aria-label="Filter audit trail" id="auditFilter">
                 <button type="button" class="btn btn-outline-secondary active" data-audit-filter="all">All</button>
                 <button type="button" class="btn btn-outline-secondary" data-audit-filter="review">
