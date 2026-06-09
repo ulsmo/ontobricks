@@ -1914,14 +1914,17 @@ function createGroupFromView() {
         return;
     }
 
-    const design = ontologyDesigner.toJSON();
-    const entities = design.entities || [];
-    if (entities.length === 0) {
-        showNotification('This view has no entities to group.', 'warning');
+    // Only the entities actually visible in the business view should become
+    // group members — hidden entities (curated out of the view) are excluded.
+    const memberNames = (typeof ontologyDesigner.getVisibleEntityNames === 'function'
+        ? ontologyDesigner.getVisibleEntityNames()
+        : (ontologyDesigner.toJSON().entities || []).map(e => e.name)
+    ).filter(Boolean);
+
+    if (memberNames.length === 0) {
+        showNotification('This view has no visible entities to group.', 'warning');
         return;
     }
-
-    const memberNames = entities.map(e => e.name).filter(Boolean);
     const viewName = currentDesignView || 'default';
     const defaultGroupName = viewName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
 

@@ -421,3 +421,40 @@ loopback/httpx client bases rather than request-derived values.
 
 **Test result**: `uv run pytest tests/units` -> **2321 passed** (no behavioral change to tested
 paths; both touched files are logging/skip-only middleware with no dedicated unit tests).
+
+---
+
+## Business Views: count and group from *visible* entities, not the full ontology
+
+**Context**: In the Visual Ontology Designer (Business Views) the entity counter showed the total
+number of ontology classes merged into the layout rather than the entities actually visible in the
+curated view. A `Support` view with 6 visible entities (9 hidden) displayed "Entities: 15", and
+clicking *Create Group* proposed all 15 entities instead of the 6 belonging to the view. A view
+stores every ontology class in `layout.entities[]` and hides the non-members via
+`visibility.hiddenEntities`, so any counter built from `entities.size` over-counts.
+
+**Changes**:
+1. `src/front/static/global/ontoviz/ontoviz.js`
+   - Added `getVisibleEntityCount()`, `getVisibleRelationshipCount()`,
+     `getVisibleInheritanceCount()`, and `getVisibleEntityNames()` helpers that respect
+     `visibilityState`. The relationship/inheritance counters apply the full visibility rule
+     (`sourceVisible && targetVisible && explicitlyVisible`), mirroring
+     `_updateRelationshipVisibility` / `_updateInheritanceVisibility`, so links whose endpoint
+     entities are hidden are not counted.
+   - `_updateStatusBar()` now reports the visible counts (headline now matches the canvas).
+   - Visibility palette section title now shows "Entities (visible / total visible)".
+   - `_toggleItemVisibility()` refreshes the status bar so counters stay live when entities are
+     shown/hidden or "Hide from view" is used.
+2. `src/front/static/global/js/ontology-design.js`
+   - `createGroupFromView()` now builds group members from `getVisibleEntityNames()` (visible-only),
+     with a graceful fallback to the previous full list if the helper is unavailable.
+
+**Modified files**:
+- `src/front/static/global/ontoviz/ontoviz.js`
+- `src/front/static/global/js/ontology-design.js`
+
+**Test result**: `uv run pytest -q` -> **2771 passed, 17 skipped, 41 failed** in 256.62s. The 41
+failures are the same pre-existing, unrelated set documented in earlier sections of this file
+(`tests/mcp/integration` leaves the asyncio event loop closed, cascading into
+`test_review_endpoints.py` / `test_set_version_status_endpoint.py`). This change is frontend-only
+(OntoViz canvas JS), which has no Python test coverage, so the failing set is unchanged by it.
