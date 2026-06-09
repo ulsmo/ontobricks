@@ -151,11 +151,21 @@ OntoBricks can be positioned as the **semantic layer for the Databricks Lakehous
 | **Mapping — orphan detection**              | Validation pass that flags mapped entities with no relationships (isolated nodes), surfaced as advisory warnings in the Mapping designer and the Cockpit readiness checks | P2       |
 | **Scheduler — inference & materialization** | Extend the scheduler so OWL 2 RL inference and SWRL materialization can run as scheduled tasks alongside the existing build job, with results recorded in the build-run trace | P2       |
 | **Graph analytics metrics**                 | Compute graph-specific centrality and structure metrics over the knowledge graph — betweenness, PageRank, degree/closeness centrality, clustering coefficient, connected components — surfaced in the Knowledge Graph explorer (node sizing/ranking) and the Domain Cockpit | P1       |
+| **Collaborative comments & tasks**          | Contextual commenting anywhere on a `DRAFT` domain — on the ontology canvas, mapping designer, and while exploring the knowledge graph. Users can attach threaded comments to any object (class, property, mapping, node/edge) and read the full comment trail to understand what's happening and why. The app also proposes turning a comment into a **personalized task assigned to a teammate**, tracked through the version-lifecycle and surfaced in the Validation & Review workspace | P1       |
 
 
 #### Why a fast-follow 0.6.0
 
-These items share the same surfaces just reworked in 0.5.0 (the ontology designer, the mapping canvas, the version lifecycle, and the scheduler/build-run trace). Shipping them as a cohesive fast-follow — rather than folding them into the larger 0.7.0 Neo4j effort — keeps the 0.5 line feature-complete against its original scope and delivers the most-requested workflow gaps to existing users quickly.
+These items share the same surfaces just reworked in 0.5.0 (the ontology designer, the mapping canvas, the version lifecycle, and the scheduler/build-run trace). Shipping them as a cohesive fast-follow — rather than folding them into the larger 0.7.0 Neo4j effort — keeps the 0.5 line feature-complete against its original scope and delivers the most-requested workflow gaps to existing users quickly. Collaborative comments & tasks build directly on the `DRAFT → IN-REVIEW → PUBLISHED` lifecycle and the Validation & Review workspace, turning the review loop from a single sign-off step into an ongoing, contextual conversation across the team.
+
+#### Deployment & data model (Collaborative comments & tasks)
+
+The feature introduces new persistence in the **Lakebase registry schema** (`ontobricks_registry`). It extends the existing append-only `domain_review_events` table (which already records `commented` events at the `(domain_id, version)` grain) with two new tables:
+
+- **`domain_comments`** — threaded, contextual comments anchored to a specific object on a `DRAFT` version. Grain is `(domain_id, version)` plus an `anchor_type` (`ontology_class` | `ontology_property` | `mapping` | `graph_node` | `graph_edge` | `domain`) and `anchor_ref` (the target URI / node id), with `parent_id` for reply threads, `author`, `body`, and `resolved` flag.
+- **`domain_tasks`** — personalized tasks created from a comment or standalone, with `assignee` (principal), `created_by`, `title`, `description`, `status` (`open` | `in_progress` | `done` | `cancelled`), optional `due_date`, and a `comment_id` back-reference. Surfaced in the Validation & Review "My Tasks" worklist.
+
+**Deployment is automatic and idempotent.** These tables (and their indexes) are added to `src/back/objects/registry/store/lakebase/schema.sql` using `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, exactly like the existing registry tables. They are created on the next `LakebaseRegistryStore.initialize()` and re-applied safely on every deploy. Existing deployments pick them up by re-running the registry init (**Settings → Registry → Initialize**) or `make bootstrap-lakebase`, which also re-grants `USAGE/DML` on the new objects to the app and MCP service principals — **no destructive migration and no manual DDL required**.
 
 ---
 
@@ -248,6 +258,7 @@ Neo4j is the dominant graph database with 40%+ market share. Customers in financ
 | **Mapping multi-select & orphan check** | —  | —    | —    | ✅    | ✅    | ✅    | ✅    |
 | **Scheduled inference / materialization** | — | —   | —    | ✅    | ✅    | ✅    | ✅    |
 | **Graph analytics (betweenness, PageRank, …)** | — | — | —  | ✅    | ✅    | ✅    | ✅    |
+| **Collaborative comments & tasks**    | —    | —    | —    | ✅    | ✅    | ✅    | ✅    |
 | **Neo4j connector**                   | —    | —    | —    | —    | ✅    | ✅    | ✅    |
 | Fine-grained RBAC                     | —    | —    | —    | —    | —    | ✅    | ✅    |
 | Multi-workspace federation            | —    | —    | —    | —    | —    | ✅    | ✅    |

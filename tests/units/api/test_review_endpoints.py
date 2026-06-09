@@ -133,3 +133,28 @@ async def test_publish_delegates():
         )
     assert result["status"] == "PUBLISHED"
     publish.assert_called_once()
+
+
+async def test_reopen_delegates():
+    with (
+        patch.object(
+            _review.SettingsService, "resolve_domain_role",
+            return_value="admin",
+        ) as resolve,
+        patch.object(
+            _review.ReviewService, "reopen",
+            return_value={"success": True, "status": "DRAFT"},
+        ) as reopen,
+    ):
+        result = await _review.reopen(
+            "acme", "2",
+            _request({"comment": "hotfix"}, user_role="admin"),
+            session_mgr=MagicMock(), settings=MagicMock(),
+        )
+    assert result["status"] == "DRAFT"
+    assert resolve.call_args.args[1] == "acme"
+    assert reopen.call_args.args[3:] == ("acme", "2")
+    assert reopen.call_args.kwargs["comment"] == "hotfix"
+    assert reopen.call_args.kwargs["user_role"] == "admin"
+    assert reopen.call_args.kwargs["user_domain_role"] == "admin"
+    reopen.assert_called_once()

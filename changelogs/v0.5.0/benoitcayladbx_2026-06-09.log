@@ -299,3 +299,40 @@ render problem with two contributing causes:
 **Test result**: `uv run pytest -q --ignore=tests/property --ignore=tests/e2e` -> 2532 passed,
 17 skipped (frontend-only change; `tests/property` and `tests/e2e` skipped due to pre-existing
 env issues: `hypothesis` not installed and a 3.9-only syntax in `tests/e2e/conftest.py`).
+
+---
+
+## Complete validation/review test coverage (my_tasks, summarize resets, reopen endpoint)
+
+**Context**: Audited the Validation & Review workflow (`ReviewService` + `/review` router +
+version lifecycle) for test gaps. The orchestration, state machine and sign-off paths were already
+well covered, but a few deterministic behaviors had no unit tests: the cross-domain `my_tasks()`
+worklist logic (only its API delegation was tested), the approval-reset rule in `_summarize` for
+the `published` / `reopened` rounds, the publish audit `meta.quorum_override == False` path when the
+quorum is met by a non-admin builder, and the `POST /review/{folder}/{version}/reopen` endpoint
+plumbing. No production code changed — tests only.
+
+**Changes**:
+1. `tests/units/registry/test_review_service.py` — added `my_tasks()` coverage:
+   `test_my_tasks_empty_when_registry_not_configured`, `test_my_tasks_lists_draft_submit_action`,
+   `test_my_tasks_in_review_lists_review_and_publish_for_admin`,
+   `test_my_tasks_skips_versions_without_pending_actions`,
+   `test_my_tasks_sorts_newest_activity_first`, `test_my_tasks_raises_when_domain_listing_fails`
+   (with `_my_tasks_svc` / `_call_my_tasks` helpers that drive the admin role short-circuit so the
+   worklist logic runs without the Databricks permission lookup).
+2. `tests/units/registry/test_review_service.py` — added `_summarize` reset coverage
+   `test_summarize_resets_approvals_on_publish`, `test_summarize_resets_approvals_on_reopen`, and the
+   publish-meta case `test_publish_meta_records_no_override_when_quorum_met`. Imported
+   `ACTION_REOPENED` and `InfrastructureError`.
+3. `tests/units/api/test_review_endpoints.py` — added `test_reopen_delegates`, asserting target-domain
+   role resolution and argument forwarding for the previously untested `reopen` handler.
+
+**Modified files**:
+- `tests/units/registry/test_review_service.py`
+- `tests/units/api/test_review_endpoints.py`
+
+**Test result**: `uv run pytest tests/units` -> **2321 passed** (was 2311; +10 new tests). The full
+default suite shows 41 pre-existing failures unrelated to this change: the `tests/mcp/integration`
+suite leaves the asyncio event loop closed, which then breaks subsequent async tests on untouched
+files (`test_review_endpoints.py`, `test_set_version_status_endpoint.py`) — all of which pass in
+isolation and within `tests/units`.
