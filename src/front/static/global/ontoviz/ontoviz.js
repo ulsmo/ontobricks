@@ -3974,11 +3974,20 @@
             const canvasWidth = this.container.offsetWidth || 800;
             const canvasHeight = this.container.offsetHeight || 600;
 
-            // Calculate the bounding box of all entities
+            // Frame the *visible* entities. Curated business views hide part of the
+            // graph, and the hidden entities are often what anchored the original
+            // centre — measuring the bounding box over all of them would push the
+            // few visible cards off-screen, making the view look empty.
+            const visibleEntities = entityList.filter(
+                entity => this.visibilityState?.entities?.get(entity.id) !== false
+            );
+            const boxEntities = visibleEntities.length > 0 ? visibleEntities : entityList;
+
+            // Calculate the bounding box of the visible entities
             let minX = Infinity, minY = Infinity;
             let maxX = -Infinity, maxY = -Infinity;
 
-            entityList.forEach(entity => {
+            boxEntities.forEach(entity => {
                 const bounds = this._getEntityBounds(entity);
                 minX = Math.min(minX, bounds.x);
                 minY = Math.min(minY, bounds.y);

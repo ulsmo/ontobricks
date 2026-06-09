@@ -1517,15 +1517,27 @@ async function loadOntologyIntoDesigner(showAlert = true) {
     
     // First, try to load from saved design layout (domain persistence)
     const savedLayout = await loadDesignLayoutFromProject();
-    
+
+    // Resolve ontology classes up-front. ``OntologyState.config`` can exist while
+    // ``classes`` is still empty (it is populated asynchronously after a reload).
+    // Guarding the merge branch on ``classes.length`` — not just on ``config``
+    // being truthy — stops us from building a zero-entity layout that renders a
+    // blank canvas; we fall through to the saved-layout-only branch instead.
+    const _ontologyReady = typeof OntologyState !== 'undefined' && OntologyState.config;
+    const classes = _ontologyReady ? (OntologyState.config.classes || []) : [];
+    const properties = _ontologyReady ? (OntologyState.config.properties || []) : [];
+
+    // ``center`` only the saved layout when it hides part of the graph (a curated
+    // business view): the visible subset is re-framed so it can't end up
+    // off-screen around now-hidden anchors. Full views keep their exact saved
+    // positions (center: false).
+    const _layoutHasHidden = (savedLayout?.visibility?.hiddenEntities?.length || 0) > 0;
+
     // If we have a saved layout AND ontology data, merge them
     // The saved layout provides positions/anchors, the ontology provides the current data (including properties)
-    if (savedLayout && savedLayout.entities && savedLayout.entities.length > 0 && 
-        typeof OntologyState !== 'undefined' && OntologyState.config) {
-        
-        const classes = OntologyState.config.classes || [];
-        const properties = OntologyState.config.properties || [];
-        
+    if (savedLayout && savedLayout.entities && savedLayout.entities.length > 0 &&
+        classes.length > 0) {
+
         // Create lookup maps
         const savedEntityMap = new Map();
         savedLayout.entities.forEach(e => savedEntityMap.set(e.name, e));
@@ -1703,7 +1715,7 @@ async function loadOntologyIntoDesigner(showAlert = true) {
         
         const inhCount = mergedLayout.inheritances ? mergedLayout.inheritances.length : 0;
         console.log('Loading merged layout:', mergedLayout.entities.length + ' entities, ' + mergedLayout.relationships.length + ' relationships, ' + inhCount + ' inheritances');
-        ontologyDesigner.fromJSON(mergedLayout, { autoLayout: false, center: false, animate: false });
+        ontologyDesigner.fromJSON(mergedLayout, { autoLayout: false, center: _layoutHasHidden, animate: false });
         
         // Re-enable auto-save after loading completes
         setTimeout(() => {
@@ -1736,7 +1748,7 @@ async function loadOntologyIntoDesigner(showAlert = true) {
         
         const inhCount = savedLayout.inheritances ? savedLayout.inheritances.length : 0;
         console.log('Loading from saved design layout:', savedLayout.entities.length + ' entities, ' + inhCount + ' inheritances');
-        ontologyDesigner.fromJSON(savedLayout, { autoLayout: false, center: false, animate: false });
+        ontologyDesigner.fromJSON(savedLayout, { autoLayout: false, center: _layoutHasHidden, animate: false });
         
         // Re-enable auto-save after loading completes
         setTimeout(() => {

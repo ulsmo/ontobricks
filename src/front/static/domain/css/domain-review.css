@@ -43,19 +43,41 @@
     transition: box-shadow .15s, border-color .15s, opacity .15s;
 }
 
+/* Per-stage status tone — kept consistent with the badge convention:
+   Draft = yellow (warning), In Review = blue (info), Published = green
+   (success). The current/done/todo state only controls emphasis. */
+.review-stage.tone-draft {
+    --stage: #ffc107;
+    --stage-bg: rgba(255, 193, 7, 0.12);
+    --stage-fg: #997404;
+}
+
+.review-stage.tone-inreview {
+    --stage: #0dcaf0;
+    --stage-bg: rgba(13, 202, 240, 0.12);
+    --stage-fg: #055160;
+}
+
+.review-stage.tone-published {
+    --stage: #198754;
+    --stage-bg: rgba(25, 135, 84, 0.12);
+    --stage-fg: #0a3622;
+}
+
 .review-stage.is-todo {
-    opacity: 0.55;
+    opacity: 0.5;
 }
 
 .review-stage.is-done {
-    border-color: var(--db-success);
-    background: rgba(40, 167, 69, 0.04);
+    border-color: var(--stage);
+    background: var(--stage-bg);
 }
 
 .review-stage.is-current {
-    border-color: var(--db-primary, #FF3621);
+    border-color: var(--stage);
     border-width: 2px;
-    box-shadow: 0 0 0 3px var(--db-primary-light, rgba(255, 54, 33, 0.1));
+    background: var(--stage-bg);
+    box-shadow: 0 0 0 3px var(--stage-bg);
 }
 
 .review-stage-badge {
@@ -73,15 +95,10 @@
     font-size: 0.65rem;
 }
 
-.review-stage.is-done .review-stage-badge {
-    background: var(--db-success);
-    border-color: var(--db-success);
-    color: #fff;
-}
-
+.review-stage.is-done .review-stage-badge,
 .review-stage.is-current .review-stage-badge {
-    background: var(--db-primary, #FF3621);
-    border-color: var(--db-primary, #FF3621);
+    background: var(--stage);
+    border-color: var(--stage);
     color: #fff;
 }
 
@@ -105,14 +122,9 @@
     flex: 0 0 auto;
 }
 
-.review-stage.is-done .review-stage-icon {
-    background: rgba(40, 167, 69, 0.12);
-    color: var(--db-success);
-}
-
-.review-stage.is-current .review-stage-icon {
-    background: var(--db-primary-light, rgba(255, 54, 33, 0.1));
-    color: var(--db-primary, #FF3621);
+.review-stage .review-stage-icon {
+    background: var(--stage-bg);
+    color: var(--stage-fg);
 }
 
 .review-stage-label {
@@ -125,7 +137,7 @@
     font-size: 0.6rem;
     text-transform: uppercase;
     letter-spacing: .04em;
-    color: var(--db-primary, #FF3621);
+    color: var(--stage-fg);
     font-weight: 700;
     white-space: nowrap;
 }

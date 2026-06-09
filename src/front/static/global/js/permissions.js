@@ -253,8 +253,9 @@
      * ``ontology-shared-panels.js`` / ``ontology-core.js`` only need a
      * single check instead of duplicating the logic per call site:
      *
-     *   - ``window.isActiveVersion === false`` → older inactive
-     *     version, set asynchronously by ``version-check.js``;
+     *   - ``window.isActiveVersion === false`` → the loaded version is
+     *     not editable (not DRAFT), set asynchronously by
+     *     ``version-check.js``;
      *   - domain-role below editor → viewer (or none) on the current
      *     domain. Admins always satisfy domain gates per the backend
      *     ``require(scope='domain')`` fall-back.

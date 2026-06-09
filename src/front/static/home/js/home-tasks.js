@@ -112,14 +112,16 @@
 
     function statusBadge(status) {
         const map = {
-            'DRAFT': 'bg-secondary',
-            'IN-REVIEW': 'bg-warning text-dark',
-            'PUBLISHED': 'bg-success',
+            'DRAFT': 'bg-warning-subtle text-dark border-warning',
+            'IN-REVIEW': 'bg-info-subtle text-dark border-info',
+            'PUBLISHED': 'bg-success-subtle text-dark border-success',
         };
-        const cls = map[status] || 'bg-secondary';
+        const cls = map[status] || map['DRAFT'];
         const label = status === 'IN-REVIEW' ? 'In Review'
-            : (status.charAt(0) + status.slice(1).toLowerCase());
-        return '<span class="badge ' + cls + '">' + escapeHtml(label) + '</span>';
+            : ((status || 'DRAFT').charAt(0) +
+               (status || 'DRAFT').slice(1).toLowerCase());
+        return '<span class="badge border ' + cls + '">' +
+            escapeHtml(label) + '</span>';
     }
 
     function escapeHtml(text) {

@@ -312,6 +312,14 @@ class PermissionMiddleware(BaseHTTPMiddleware):
         request.state.user_email = email
 
         if not is_databricks_app():
+            # Local / PAT dev has no proxy identity header, so resolve the
+            # developer's e-mail once via SCIM /Me. Without this, audit
+            # attribution (review sign-offs, status changes) records an
+            # empty actor and sign-off counts stay stuck at 0/N.
+            if not email:
+                from back.core.databricks import get_local_user_email
+
+                request.state.user_email = get_local_user_email()
             request.state.user_role = "admin"
             request.state.user_domain_role = "admin"
             return await call_next(request)

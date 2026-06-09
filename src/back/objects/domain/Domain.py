@@ -821,8 +821,12 @@ class Domain:
             ts_stats.pop("dt_existence", None)
             self._s.triplestore.pop("_ts_cache_timestamp", None)
             self._s.save()
-            status = "Latest" if is_latest else "Read-only"
-            msg = f"Domain loaded: {domain_name} v{version} ({status})"
+            # Editability is driven by lifecycle status (DRAFT), not by
+            # whether this is the latest version: an older DRAFT version is
+            # still fully editable.
+            lifecycle = (self._s.info.get("status") or "DRAFT").upper()
+            label = "editable" if lifecycle == "DRAFT" else f"{lifecycle}, read-only"
+            msg = f"Domain loaded: {domain_name} v{version} ({label})"
             return {
                 "success": True,
                 "message": msg,

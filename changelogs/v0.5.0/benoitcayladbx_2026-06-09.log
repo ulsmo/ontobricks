@@ -142,3 +142,160 @@ to the Validation workspace rather than drive the workflow (submit / publish) in
 - `src/front/static/global/js/navbar.js`
 
 **Test result**: `uv run pytest tests/units` -> 2311 passed.
+
+## Consistent status colors everywhere: Draft=yellow, In Review=blue, Published=green
+
+**Context**: Status badges were inconsistent. The navbar / Browse / Versions / version-check used the
+canonical subtle scheme (Draft yellow, In Review blue, Published green), but the Validation page,
+Home tasks and Registry tasks used a solid scheme (grey Draft, **yellow** In Review). The lifecycle
+diagram also highlighted the current stage in brand red, so a current Draft stage looked red.
+
+**Changes**:
+1. `src/front/static/domain/js/domain-review.js`, `src/front/static/home/js/home-tasks.js`,
+   `src/front/static/registry/js/registry-my-tasks.js` — `statusBadge()` now uses the shared
+   convention `bg-warning-subtle`/`bg-info-subtle`/`bg-success-subtle` (+ `border`), matching the
+   navbar/Browse badges. Draft is now yellow (was grey), In Review blue (was yellow).
+2. `src/front/static/domain/js/domain-review.js` — lifecycle stage boxes now carry a `tone`
+   (draft/inreview/published); `stageBox()` adds a `tone-*` class.
+3. `src/front/static/domain/css/domain-review.css` — replaced the red (`--db-primary`) current-stage
+   highlight and the green done-stage highlight with per-tone CSS variables, so each stage's border,
+   icon, badge and "you are here" label follow its status color (Draft yellow / In Review blue /
+   Published green). State (current/done/todo) now only controls emphasis (ring, border width,
+   opacity, badge icon).
+
+**Modified files**:
+- `src/front/static/domain/js/domain-review.js`
+- `src/front/static/domain/css/domain-review.css`
+- `src/front/static/home/js/home-tasks.js`
+- `src/front/static/registry/js/registry-my-tasks.js`
+
+**Test result**: `uv run pytest tests/units` -> 2311 passed (frontend-only change).
+
+## Move "Ontology Precision Score" from Domain → Information to Domain → Cockpit
+
+**Context**: The Ontology Precision Score belongs with the other readiness metrics in the Cockpit,
+not on the Information/Global settings tab.
+
+**Changes**:
+1. `src/front/templates/partials/domain/_domain_information.html` — removed the precision-score row
+   from the Global tab.
+2. `src/front/static/domain/js/domain-information.js` — removed `_renderPrecisionScore` and its call
+   in the info-load path.
+3. `src/front/templates/partials/domain/_domain_validation.html` — added an "Ontology Precision
+   Score" card (full-width, header label + progress bar + hint) in the Cockpit, before the Digital
+   Twin row.
+4. `src/front/static/domain/js/domain-validation.js` — added `loadPrecisionScore()` (fetches
+   `/domain/info`) + `renderPrecisionScore()`, called from `loadValidationDetails()` so it refreshes
+   with the rest of the cockpit. Shows "Not analyzed" with a grey bar when no score exists yet.
+
+**Modified files**:
+- `src/front/templates/partials/domain/_domain_information.html`
+- `src/front/static/domain/js/domain-information.js`
+- `src/front/templates/partials/domain/_domain_validation.html`
+- `src/front/static/domain/js/domain-validation.js`
+
+**Test result**: `uv run pytest tests/units` -> 2311 passed (frontend-only change).
+
+## Editability driven by lifecycle status only (any DRAFT version is editable)
+
+**Context**: The old rule made *older* versions read-only even when they were DRAFT — editing
+was only allowed on the *latest* version. The requirement is now: editability depends solely on
+the lifecycle status. **Only a DRAFT version can be edited, whatever the version is** (an older
+DRAFT version is fully editable). The server-side write-gate was already status-only
+(`PermissionMiddleware` blocks edits unless status == DRAFT); the "older version is read-only"
+restriction lived entirely in the frontend, which keyed read-only off `is_active` (= is-latest).
+
+**Changes**:
+1. `src/front/static/global/js/version-check.js` — read-only is now driven solely by status:
+   `editable = (versionStatus === 'DRAFT')`. Dropped the `!is_active` (older-version) condition.
+   Repurposed `window.isActiveVersion` to mean "editable" (DRAFT) instead of "is latest", so the
+   ~40 design-surface gates that key off it allow editing of older DRAFT versions. When not
+   editable, both `read-only-status` and `read-only-version` are added to `<body>` and the navbar
+   note reads "This version is <STATUS> (read-only). Set it back to DRAFT to make changes."
+2. `src/front/static/domain/js/domain-information.js` — `updateVersionStatusUI(...)` is now fed
+   `(statusData.status === 'DRAFT')` instead of `statusData.is_active`, so the Global-tab form
+   fields enable for any DRAFT version.
+3. `src/front/static/domain/js/domain-actions.js` — `updateVersionStatus(...)` renamed its first
+   param to `editable` and is fed `(data.status === 'DRAFT')`; the read-only banner message now
+   says "Set it back to Draft to make changes." instead of "Load the latest version".
+4. `src/front/static/global/js/permissions.js` — updated the `canEditOntology` doc comment to
+   reflect that `isActiveVersion === false` now means "not editable (not DRAFT)".
+5. `src/back/objects/domain/Domain.py` — the load-from-UC confirmation message now labels the
+   loaded version by lifecycle status (`editable` vs `<STATUS>, read-only`) instead of
+   `Latest`/`Read-only` based on is-latest. The create-new-version guard (must load latest first)
+   is unchanged, since creating a version is a separate operation from editing.
+
+**Modified files**:
+- `src/front/static/global/js/version-check.js`
+- `src/front/static/domain/js/domain-information.js`
+- `src/front/static/domain/js/domain-actions.js`
+- `src/front/static/global/js/permissions.js`
+- `src/back/objects/domain/Domain.py`
+
+**Test result**: `uv run pytest tests/units/auth/test_permission_middleware.py
+tests/units/domain/test_version_status_cache.py tests/units/settings/test_settings_version_status.py
+tests/units/api/test_set_version_status_endpoint.py` -> 226 passed.
+
+## Fix: review sign-offs not counted in local dev (stuck at 0/N)
+
+**Context**: When approving an IN-REVIEW version locally, the sign-off count stayed at "0/1"
+even though the APPROVED event appeared in the audit trail, so quorum was never reached. Root
+cause: in local / PAT dev there is no `x-forwarded-email` proxy header, so `request.state.user_email`
+was empty. Review events were recorded with an empty `actor`, and `ReviewService._summarize`
+intentionally skips empty actors (`if key and key not in seen`) — so the approval never counted.
+(In a deployed Databricks App the proxy header carries the identity, so this only bit local dev.)
+
+**Changes**:
+1. `src/back/core/databricks/__init__.py` — added `get_local_user_email()` (cached, `lru_cache`):
+   best-effort resolves the developer's e-mail via SCIM `/Me` once per process for local / PAT mode.
+2. `src/shared/fastapi/main.py` — `PermissionMiddleware` now, in the local-dev branch, populates
+   `request.state.user_email` from `get_local_user_email()` when the proxy header is absent. This
+   fixes audit attribution everywhere (sign-offs, status changes, `get_user_email`) in local dev.
+
+Note: this attributes *new* sign-offs. Approvals recorded earlier with an empty actor stay
+uncounted; re-approve to register a counted sign-off. Reaching quorum enables the Publish action
+but does not auto-publish — publishing remains a deliberate builder/admin step.
+
+**Modified files**:
+- `src/back/core/databricks/__init__.py`
+- `src/shared/fastapi/main.py`
+
+**Test result**: `uv run pytest tests/units/auth/test_permission_middleware.py
+tests/units/registry/test_review_service.py` -> 234 passed.
+
+---
+
+## Fix: curated business views render empty after Back-to-Draft / on an older DRAFT version
+
+**Context**: After sending a version Back to Draft (or loading an older version that is now
+editable), the Ontology Designer canvas appeared empty for *business views* specifically — the
+core ontology and the navbar were fine. Investigation confirmed there was **no server-side data
+loss**: the stored views still held all entities and their `visibility.hiddenEntities` lists
+(e.g. `Support` = 15 entities, 9 hidden -> 6 visible). The blank canvas was purely a client-side
+render problem with two contributing causes:
+1. A curated view is rendered with `center: false`, so the visible subset stayed at its original
+   wide-circle positions while the now-hidden entities (which anchored the centre) were removed —
+   leaving the few visible cards off-screen, i.e. an apparently empty canvas.
+2. `loadOntologyIntoDesigner` entered the merge branch on `OntologyState.config` being truthy
+   alone; right after a reload `config.classes` can still be empty, producing a zero-entity
+   merged layout (a genuinely blank canvas).
+
+**Changes**:
+1. `src/front/static/global/ontoviz/ontoviz.js` — `centerDiagram()` now computes its bounding box
+   over the **visible** entities only (falling back to all when none are visible), so centring a
+   curated business view frames the cards that are actually shown instead of centring around
+   hidden anchors.
+2. `src/front/static/global/js/ontology-design.js` — `loadOntologyIntoDesigner()`:
+   - resolves `classes`/`properties` up-front and guards the merge branch on `classes.length > 0`
+     (not just `config` truthiness), so an empty/not-yet-loaded `OntologyState` falls through to
+     the saved-layout-only render instead of building a zero-entity layout;
+   - both `fromJSON` calls now pass `center: _layoutHasHidden` — curated views (any hidden
+     entities) are re-framed into view, while full views keep their exact saved positions.
+
+**Modified files**:
+- `src/front/static/global/ontoviz/ontoviz.js`
+- `src/front/static/global/js/ontology-design.js`
+
+**Test result**: `uv run pytest -q --ignore=tests/property --ignore=tests/e2e` -> 2532 passed,
+17 skipped (frontend-only change; `tests/property` and `tests/e2e` skipped due to pre-existing
+env issues: `hypothesis` not installed and a 3.9-only syntax in `tests/e2e/conftest.py`).

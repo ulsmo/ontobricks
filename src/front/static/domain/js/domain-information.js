@@ -5,33 +5,6 @@
 
 let currentDomainFolder = null;
 
-/**
- * Render the ontology precision score bar in the Global tab.
- * @param {number|null} score - 0–100 integer, or null/undefined if not yet analyzed.
- */
-function _renderPrecisionScore(score) {
-    const row   = document.getElementById('domainPrecisionScoreRow');
-    const bar   = document.getElementById('domainPrecisionBar');
-    const label = document.getElementById('domainPrecisionLabel');
-    if (!row || !bar || !label) return;
-
-    if (score === null || score === undefined) return;  // not analyzed yet — keep hidden
-
-    row.classList.remove('d-none');
-
-    const pct = Math.max(0, Math.min(100, score));
-    bar.style.width = pct + '%';
-    bar.setAttribute('aria-valuenow', pct);
-
-    let colour = 'bg-success';
-    if (pct < 50) colour = 'bg-danger';
-    else if (pct < 80) colour = 'bg-warning';
-    bar.className = `progress-bar ${colour}`;
-
-    label.textContent = pct + ' / 100';
-    label.style.color = pct < 50 ? '#dc3545' : pct < 80 ? '#fd7e14' : '#198754';
-}
-
 // Load available LLM endpoints
 async function loadLlmEndpoints() {
     const select = document.getElementById('domainLlmEndpoint');
@@ -348,7 +321,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         ]);
 
         if (statusData && statusData.success) {
-            updateVersionStatusUI(statusData.is_active, statusData.version, statusData.has_registry);
+            // Editability depends only on lifecycle status (DRAFT), not on
+            // whether this is the latest version. Older DRAFT versions edit.
+            const editable = (statusData.status || 'DRAFT') === 'DRAFT';
+            updateVersionStatusUI(editable, statusData.version, statusData.has_registry);
             populateVersionDropdown(statusData.available_versions, statusData.version);
             const sf = statusData.domain_folder || statusData.project_folder;
             if (sf) {
@@ -364,7 +340,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (infoData.info && infoData.info.llm_endpoint) {
                 setSelectedLlmEndpoint(infoData.info.llm_endpoint);
             }
-            _renderPrecisionScore(infoData.precision_score);
         }
 
         // The DT panel reads catalog/schema from the dropdown rendering of

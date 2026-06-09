@@ -147,19 +147,22 @@
 
         const boxes =
             stageBox({
-                state: stateOf(0), icon: 'pencil', label: 'Draft',
+                state: stateOf(0), tone: 'draft', icon: 'pencil',
+                label: 'Draft',
                 desc: 'Author edits the model', footer: draftFooter,
             }) +
             flowArrow('Submit', curIdx >= 1) +
             stageBox({
-                state: stateOf(1), icon: 'eye', label: 'In Review',
+                state: stateOf(1), tone: 'inreview', icon: 'eye',
+                label: 'In Review',
                 desc: d.quorum + ' sign-off' + (d.quorum > 1 ? 's' : '') +
                     ' required',
                 footer: irFooter,
             }) +
             flowArrow('Publish', curIdx >= 2) +
             stageBox({
-                state: stateOf(2), icon: 'broadcast', label: 'Published',
+                state: stateOf(2), tone: 'published', icon: 'broadcast',
+                label: 'Published',
                 desc: 'Live on API / MCP', footer: pubFooter,
             });
 
@@ -180,7 +183,8 @@
             : (cfg.state === 'current'
                 ? '<span class="review-stage-badge"><i class="bi bi-record-fill"></i></span>'
                 : '');
-        return '<div class="review-stage is-' + cfg.state + '">' +
+        return '<div class="review-stage is-' + cfg.state +
+            ' tone-' + cfg.tone + '">' +
             badge +
             '<div class="review-stage-head">' +
             '<span class="review-stage-icon"><i class="bi bi-' + cfg.icon +
@@ -512,14 +516,16 @@
     /* ── Helpers ───────────────────────────────────── */
     function statusBadge(status) {
         const map = {
-            'DRAFT': 'bg-secondary',
-            'IN-REVIEW': 'bg-warning text-dark',
-            'PUBLISHED': 'bg-success',
+            'DRAFT': 'bg-warning-subtle text-dark border-warning',
+            'IN-REVIEW': 'bg-info-subtle text-dark border-info',
+            'PUBLISHED': 'bg-success-subtle text-dark border-success',
         };
-        const cls = map[status] || 'bg-secondary';
+        const cls = map[status] || map['DRAFT'];
         const label = status === 'IN-REVIEW' ? 'In Review'
-            : (status.charAt(0) + status.slice(1).toLowerCase());
-        return '<span class="badge ' + cls + '">' + escapeHtml(label) + '</span>';
+            : ((status || 'DRAFT').charAt(0) +
+               (status || 'DRAFT').slice(1).toLowerCase());
+        return '<span class="badge border ' + cls + '">' +
+            escapeHtml(label) + '</span>';
     }
 
     function formatTime(iso) {
