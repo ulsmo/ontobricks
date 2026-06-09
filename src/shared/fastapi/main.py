@@ -324,7 +324,9 @@ class PermissionMiddleware(BaseHTTPMiddleware):
             request.state.user_domain_role = "admin"
             return await call_next(request)
 
-        path = request.url.path
+        # Raw routed path, not request.url.path: the latter is reconstructed
+        # from the Host header and could be poisoned (BadHost / CVE-2026-48710).
+        path = request.scope["path"]
 
         if any(path.startswith(p) for p in _PERM_BYPASS_PREFIXES):
             request.state.user_role = ""

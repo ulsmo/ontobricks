@@ -47,6 +47,17 @@ def _graphql_safe_error_message(exc: BaseException) -> str:
     return "The query could not be executed."
 
 
+def _is_external_request(request: Request) -> bool:
+    """Whether the request hit the public external GraphQL mount.
+
+    Reads the raw routed path (``scope["path"]``) rather than
+    ``request.url.path``: the latter is reconstructed from the Host header and
+    could be poisoned to flip the external/internal gate (BadHost /
+    CVE-2026-48710).
+    """
+    return request.scope["path"].startswith(EXTERNAL_GRAPHQL_PUBLIC_PREFIX)
+
+
 # ------------------------------------------------------------------
 # Request / response models
 # ------------------------------------------------------------------
@@ -263,7 +274,7 @@ async def graphql_playground(
     session_mgr: SessionManager = Depends(get_session_manager),
     settings: Settings = Depends(get_settings),
 ):
-    is_external = request.url.path.startswith(EXTERNAL_GRAPHQL_PUBLIC_PREFIX)
+    is_external = _is_external_request(request)
     domain = _load_domain_from_registry(
         domain_name, session_mgr, settings, external=is_external
     )
@@ -289,7 +300,7 @@ async def graphql_execute(
     session_mgr: SessionManager = Depends(get_session_manager),
     settings: Settings = Depends(get_settings),
 ):
-    is_external = request.url.path.startswith(EXTERNAL_GRAPHQL_PUBLIC_PREFIX)
+    is_external = _is_external_request(request)
     domain = _load_domain_from_registry(
         domain_name, session_mgr, settings, external=is_external
     )
@@ -339,7 +350,7 @@ async def graphql_sdl(
     session_mgr: SessionManager = Depends(get_session_manager),
     settings: Settings = Depends(get_settings),
 ):
-    is_external = request.url.path.startswith(EXTERNAL_GRAPHQL_PUBLIC_PREFIX)
+    is_external = _is_external_request(request)
     domain = _load_domain_from_registry(
         domain_name, session_mgr, settings, external=is_external
     )
@@ -365,7 +376,7 @@ async def graphql_debug(
     session_mgr: SessionManager = Depends(get_session_manager),
     settings: Settings = Depends(get_settings),
 ):
-    is_external = request.url.path.startswith(EXTERNAL_GRAPHQL_PUBLIC_PREFIX)
+    is_external = _is_external_request(request)
     domain = _load_domain_from_registry(
         domain_name, session_mgr, settings, external=is_external
     )

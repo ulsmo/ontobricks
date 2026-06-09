@@ -336,3 +336,88 @@ default suite shows 41 pre-existing failures unrelated to this change: the `test
 suite leaves the asyncio event loop closed, which then breaks subsequent async tests on untouched
 files (`test_review_endpoints.py`, `test_set_version_status_endpoint.py`) — all of which pass in
 isolation and within `tests/units`.
+
+---
+
+## Patch six Dependabot vulnerabilities (pyarrow, starlette, aiohttp, strawberry-graphql)
+
+**Context**: Six GitHub Dependabot alerts (#31–#36) flagged vulnerable transitive/direct
+dependencies pinned in `uv.lock`. Bumped each to its first fixed release and re-resolved the
+lockfile. The starlette one (BadHost / CVE-2026-48710) is the only code-relevant case: it poisons
+`request.url.path` via a malformed Host header, bypassing path-based auth. The framework upgrade
+fixes it, and as defense-in-depth we also switched every security-sensitive path check to read the
+raw routed path (`request.scope["path"]`) per the advisory's durable-fix recommendation.
+
+Advisories addressed:
+- `pyarrow` 23.0.0 -> 23.0.1 — Arrow C++ IPC use-after-free (CVE-2026-25087 / GHSA-rgxp-2hwp-jwgg).
+  The Python binding never exposed the affected `PreBufferMetadata` API; bump silences the alert (#36).
+- `starlette` 0.50.0 -> 1.2.1 — BadHost missing Host-header validation (CVE-2026-48710 /
+  GHSA-86qp-5c8j-p5mr) (#35). Required bumping `fastapi` (0.128.0 -> 0.136.3) for Starlette 1.0+ support.
+- `aiohttp` 3.13.5 -> 3.14.0 (transitive via mlflow) — CookieJar.load() pickle RCE (CVE-2026-34993 /
+  GHSA-jg22-mg44-37j8) and per-request cookie leak on cross-origin redirect (CVE-2026-47265 /
+  GHSA-hg6j-4rv6-33pg) (#31, #32).
+- `strawberry-graphql` 0.315.4 -> 0.316.0 — MaxAliasesLimiter fragment-spread bypass (CVE-2026-47707 /
+  GHSA-fr49-mhgj-crfc) and circular-fragment DOS in QueryDepthLimiter (#33, #34).
+
+**Changes**:
+1. `pyproject.toml` — bumped direct floors `pyarrow>=23.0.1`, `starlette>=1.0.1`,
+   `strawberry-graphql>=0.315.7`, `fastapi>=0.129.0`; added `aiohttp>=3.14.0` to
+   `[tool.uv].constraint-dependencies` (transitive). Each pin carries a CVE/GHSA comment.
+2. `uv.lock` — re-resolved (`uv lock`); 5 packages updated as listed above.
+3. `src/shared/fastapi/csrf.py` — CSRF bypass-prefix check reads `request.scope["path"]`
+   instead of `request.url.path` (BadHost durable fix).
+4. `src/back/objects/session/FileSessionMiddleware.py` — session bypass-prefix check reads
+   `request.scope["path"]`.
+5. `src/shared/fastapi/main.py` — `PermissionMiddleware` permission bypass-prefix check reads
+   `request.scope["path"]`.
+6. `src/back/fastapi/graphql_routes.py` — added `_is_external_request()` helper (dedupes 4
+   identical external/internal gate checks) reading `request.scope["path"]`; replaced all 4 call sites.
+7. `tests/units/auth/test_permission_middleware.py` — `_make_request()` now also sets
+   `req.scope = {"path": path}` so the mock mirrors a real ASGI request (the middleware reads the
+   raw routed path from `scope["path"]`). Without this the mock returned a `MagicMock` for the path.
+
+**Modified files**:
+- `pyproject.toml`
+- `uv.lock`
+- `src/shared/fastapi/csrf.py`
+- `src/back/objects/session/FileSessionMiddleware.py`
+- `src/shared/fastapi/main.py`
+- `src/back/fastapi/graphql_routes.py`
+- `tests/units/auth/test_permission_middleware.py`
+
+**Test result**: full suite `uv run pytest -q` -> **2771 passed, 17 skipped, 41 failed**. The 41
+failures are pre-existing and unrelated: the `tests/mcp/integration` suite leaves the asyncio event
+loop closed, cascading into the async endpoint tests (`test_review_endpoints.py`,
+`test_set_version_status_endpoint.py`) — both confirmed **12 passed** in isolation. The 195
+`test_permission_middleware.py` tests pass after the `scope` fix.
+
+---
+
+## Finish the BadHost sweep: audit every remaining `request.url.path` user
+
+**Context**: Follow-up to the Dependabot/starlette BadHost fix above. That change hardened the
+security-sensitive path checks (PermissionMiddleware, CSRFMiddleware, FileSessionMiddleware, GraphQL
+external/internal gate). This task audited the *entire* API/middleware surface for any other code
+still deriving a path or URL from the Host header (`request.url.path`, `request.url_for`, redirect
+builders) and aligned the stragglers with the durable fix. The full sweep found only two remaining
+`request.url.path` users; everything else was a false positive: template `url_for('static', …)`
+returns a relative `/static/...` path, `resolve.py` redirects to an internally-computed app path
+(not Host-derived), and the `base_url` references in `dtwin.py` / agents / mcp-server are
+loopback/httpx client bases rather than request-derived values.
+
+**Changes**:
+1. `src/shared/fastapi/timing.py` — `RequestTimingMiddleware` now reads the raw routed path
+   (`request.scope["path"]`) for its `_SKIP_PREFIXES` `startswith` decision instead of
+   `request.url.path`. Same poisonable pattern as the already-fixed middlewares (not a security
+   boundary, but a poisoned Host could otherwise flip the static/health skip logic and log an
+   attacker-controlled path).
+2. `src/shared/fastapi/error_handlers.py` — the unhandled-exception handler logs
+   `request.scope["path"]` instead of `request.url.path`, so the error log records the true routed
+   path and not a Host-reconstructed one.
+
+**Modified files**:
+- `src/shared/fastapi/timing.py`
+- `src/shared/fastapi/error_handlers.py`
+
+**Test result**: `uv run pytest tests/units` -> **2321 passed** (no behavioral change to tested
+paths; both touched files are logging/skip-only middleware with no dedicated unit tests).

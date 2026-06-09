@@ -4,22 +4,33 @@ version = "0.5.0"
 description = "Ontology Management Tool for Databricks"
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.109.0",
+    # fastapi>=0.129.0 added Starlette 1.0.0+ support (needed for the
+    # starlette>=1.0.1 BadHost fix below).
+    "fastapi>=0.129.0",
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "python-multipart>=0.0.27",
-    "starlette>=0.35.0",
+    # starlette>=1.0.1: BadHost (CVE-2026-48710 / GHSA-86qp-5c8j-p5mr) — missing
+    # Host-header validation poisons request.url.path, bypassing path-based auth.
+    # Requires fastapi>=0.129 (Starlette 1.0 support added upstream Feb 2026).
+    "starlette>=1.0.1",
     "itsdangerous>=2.1.0",
     "jinja2>=3.1.0",
     "aiofiles>=23.0.0",
     "databricks-sql-connector>=3.0.0",
     "databricks-sdk>=0.20.0",
-    "pyarrow>=14.0.0",
+    # pyarrow>=23.0.1: Arrow C++ IPC use-after-free (CVE-2026-25087 /
+    # GHSA-rgxp-2hwp-jwgg). The Python binding doesn't expose the affected
+    # PreBufferMetadata API, but pin to silence the advisory.
+    "pyarrow>=23.0.1",
     "rdflib>=7.6.0",
     "python-dotenv>=1.2.2",
     "requests>=2.33.0",
-    "strawberry-graphql[fastapi]>=0.315.4",
+    # strawberry-graphql>=0.315.7: MaxAliasesLimiter fragment-spread bypass
+    # (CVE-2026-47707 / GHSA-fr49-mhgj-crfc) and circular-fragment DOS in
+    # QueryDepthLimiter — both DOS via resource exhaustion.
+    "strawberry-graphql[fastapi]>=0.315.7",
     "mlflow>=3.11.1",
     "apscheduler>=3.10,<4",
     "owlrl>=7.0.0",
@@ -96,6 +107,10 @@ constraint-dependencies = [
     # idna 3.13 closes bypass of CVE-2024-3651 mitigation (GHSA-65pc-fj4g-8rjx):
     #   specially crafted inputs to idna.encode() could still reach quadratic-time path.
     "idna>=3.13",
+    # aiohttp 3.14.0 fixes two issues (pulled in transitively by mlflow):
+    #   GHSA-jg22-mg44-37j8 (CVE-2026-34993)  CookieJar.load() pickle deserialization RCE
+    #   GHSA-hg6j-4rv6-33pg (CVE-2026-47265)  per-request cookies leaked on cross-origin redirect
+    "aiohttp>=3.14.0",
 ]
 
 [tool.pytest.ini_options]
