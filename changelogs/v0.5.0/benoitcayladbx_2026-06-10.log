@@ -457,6 +457,27 @@ border + "Current" badge; requested a more obvious highlight.
 **Test result**: CSS-only change; no lint errors. Hard refresh / dev-server restart needed
 to bust the cached `?v=` asset.
 
+## Docs/rules: codify the single inline-spinner style
+
+**Context**: Make the "one brand spinner everywhere" convention explicit in the Cursor
+frontend rules so future work doesn't reintroduce ad-hoc spinners (the home gateway
+loader had used a `bi-hourglass` glyph before being switched to the brand spinner).
+
+**Changes**:
+1. `.cursor/11-frontend-design.mdc` — added a **Loading Spinners** subsection documenting
+   the single brand spinner: inline via plain Bootstrap `.spinner-border` /
+   `.spinner-grow` (auto-repainted by the `main.css` override), large/centered via
+   `.ob-loading-spinner`, full-page via `#domainLoadingOverlay`; clarified that
+   `.spin-animation` is a status icon, not a loading spinner; listed don'ts (no second
+   spinner style, no `.spinner-border` overrides, no redrawing the brand SVG). Updated the
+   Reusable Components Catalog "Loading spinner" entry and added a matching bullet to
+   "What NOT to Do".
+
+**Modified files**:
+- `.cursor/11-frontend-design.mdc`
+
+**Test result**: Rules/docs-only change — no code touched, no tests required.
+
 ## UI: restore icon-to-label spacing in navbar menu items
 
 **Context**: Making `.nav-link` a flexbox (previous change) collapsed the whitespace
