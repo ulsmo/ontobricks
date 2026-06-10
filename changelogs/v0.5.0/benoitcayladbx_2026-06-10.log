@@ -1,0 +1,38 @@
+# v0.5.0 — 2026-06-10 — benoitcayladbx
+
+## Fix #48: R2RML relationship URIs use the class label instead of the entity name
+
+**Context**: GitHub issue [#48](https://github.com/databrickslabs/ontobricks/issues/48). In the
+Digital Twin graph view, relationships between entities were never rendered in Filter → Expand
+mode: only `rdf:type` assertions and datatype-property triples came back, and the BFS expansion
+reported `expanded_count == initial_count` (no neighbours discovered). Root cause was a URI
+namespace mismatch in the R2RML generator. `_add_entity_mapping` builds entity subject URIs from
+the **local name of the ontology class URI** (`{base}{localName}/{id}`), whereas
+`_resolve_class_name` — used by `_add_relationship_mapping` for the subject/object templates —
+prioritised the **`ontology_class_label`**. When a class label differs from the local name of its
+class URI, entity triples and relationship triples were written to two different URI namespaces and
+were therefore never linked in the graph.
+
+**Changes**:
+1. `src/back/core/w3c/r2rml/R2RMLGenerator.py` — extracted a single shared helper
+   `_entity_uri_name(class_uri, class_label, table)` that reproduces the entity subject-URI naming
+   rule (local name of the class URI, else label, else table) as the **single source of truth** for
+   the class-name segment of an entity URI. `_add_entity_mapping` now calls it (replacing the inline
+   duplicate). `_resolve_class_name` now, for a matched entity, returns `_entity_uri_name(...)` using
+   the matched entity's own `ontology_class` / `ontology_class_label` / table — guaranteeing the
+   relationship subject/object URIs land byte-for-byte in the same namespace as the entity URIs. The
+   former Priority 1 (entity label first) was the bug and is removed; the no-entity-matched fallback
+   path (resolved URI → config label → class URI → table) is preserved unchanged.
+2. `tests/units/mapping/test_r2rml_generator.py` — added
+   `test_relationship_uris_match_entity_uris_when_label_differs`, a regression test for #48 where the
+   class URI local names (`Cust`, `Ord`) deliberately differ from the labels (`Customer`, `Order`).
+   It asserts that both entity and relationship templates use the `Cust`/`Ord` namespace and that the
+   label namespace (`Customer/`, `Order/`) never appears.
+
+**Modified files**:
+- `src/back/core/w3c/r2rml/R2RMLGenerator.py`
+- `tests/units/mapping/test_r2rml_generator.py`
+
+**Test result**: `python -m pytest tests/units` -> **2266 passed, 15 skipped**. Targeted
+`tests/units/mapping tests/units/dtwin` -> 262 passed. (`tests/property` skipped: `hypothesis` not
+installed in this env — nightly-only.)
