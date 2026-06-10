@@ -20,6 +20,18 @@
 
 ---
 
+## Audit Trail (Cross-Cutting Summary)
+
+> Consolidated view of the audit-trail work shipped in 0.5.0. Full detail lives in the **Ontology Validation & Review Workflow** and **Build-Run Tracing & Analytics** sections below.
+
+- **Review audit log** — new append-only `domain_review_events` table (actor, action, `from → to`, comment, meta, timestamp) written by `ReviewService` on every `submit / signoff / publish / reopen`, plus a chat-style "all comments" history viewer reachable from the worklists.
+- **Audit trail viewer (Domain → Audit trail)** — a single domain-wide feed interleaving review events (with comments) and build runs, with **All / Status / Builds** filter pills and a version dropdown (defaults to the current version).
+- **Build-run tracing (Runs)** — append-only `build_runs` table (one immutable row per UI / API / scheduler build; "active" = most recent successful run), surfaced as a per-domain **Runs** tab and a Registry → Automation **Build Analytics** panel.
+- **Lifecycle attribution** — direct status-dropdown changes (`/domain/set-version-status`) also write an audit row tagged `meta.source="lifecycle"`; local-dev sign-offs are attributed via a cached SCIM `/Me` lookup so quorum counts correctly without the proxy header.
+- **Schema provisioning** — `bootstrap-lakebase-perms.sh` / `make bootstrap-lakebase` create `domain_review_events` and `build_runs` (+ indexes) idempotently as the schema owner.
+
+---
+
 ## Domain Version Lifecycle
 
 - New per-version status `DRAFT → IN-REVIEW → PUBLISHED`, enforced server-side by a single source of truth (`registry/version_lifecycle.py`: `ALLOWED_TRANSITIONS`, `is_editable`, `check_status_transition`).
@@ -36,15 +48,15 @@
 
 ## Ontology Validation & Review Workflow
 
-- New `domain_review_events` append-only audit table (actor, action, `from → to`, comment, meta, timestamp) and a stateless `ReviewService` orchestrator: `my_tasks`, `review_detail`, `submit`, `signoff`, `publish`, `reopen`. Approvals reset on resubmit / change-request / publish.
+- **[Audit]** New `domain_review_events` **append-only audit table** (actor, action, `from → to`, comment, meta, timestamp) and a stateless `ReviewService` orchestrator: `my_tasks`, `review_detail`, `submit`, `signoff`, `publish`, `reopen`. Approvals reset on resubmit / change-request / publish.
 - New `/review` router: `GET /my-tasks`, `GET /{folder}/{version}`, and POST `submit | signoff | publish | reopen`, all resolving the caller's role against the *target* domain.
 - **Domain → Validation** workspace: a visual lifecycle diagram (Draft → In Review → Published with the people involved at each stage), status banner with live quorum progress, a soft (advisory) consistency-check summary, header-mounted action buttons, and the audit timeline.
 - **My Tasks** worklist on Registry → Review and on the **Home** page (revealed only when tasks exist), each handing off to the Validation workspace via a single **Validate** button rather than driving the workflow inline.
 - **Per-domain sign-off quorum**: stored as a typed `review_quorum` column on `domains` (default 1), set at domain creation and editable on Domain → Information → Global. The old registry-wide `global_config.review_quorum` is no longer read.
 - **Admin quorum override**: admins (app- or domain-level) can publish regardless of quorum; the override is recorded in the published event's meta and surfaced in the UI.
 - **Review comments everywhere**: a shared `ReviewModals` helper adds a comment prompt to *every* status switch and a chat-style "all comments" history viewer reachable from the worklists.
-- **Domain → Audit trail**: a single domain-wide feed interleaving review events (with comments) and build runs, with All / Status / Builds filter pills and a version dropdown (defaults to the current version).
-- **Attribution**: direct lifecycle dropdown changes (`/domain/set-version-status`) now also write an audit row tagged `meta.source="lifecycle"`; local-dev sign-offs are attributed via a cached SCIM `/Me` lookup so quorum counts correctly without the proxy header.
+- **[Audit] Domain → Audit trail (viewer)**: a single domain-wide feed interleaving review events (with comments) and build runs, with All / Status / Builds filter pills and a version dropdown (defaults to the current version).
+- **[Audit] Attribution**: direct lifecycle dropdown changes (`/domain/set-version-status`) now also write an audit row tagged `meta.source="lifecycle"`; local-dev sign-offs are attributed via a cached SCIM `/Me` lookup so quorum counts correctly without the proxy header.
 
 ## Graph Chat — Streaming (SSE)
 
@@ -75,9 +87,9 @@
 
 ## Build-Run Tracing & Analytics
 
-- New append-only `build_runs` registry table (FK to `domains`, keyed by `(domain_id, version)`): one immutable row per build across UI / API / scheduler paths; "active" build derived as the most recent successful run.
+- **[Audit]** New append-only `build_runs` registry table (FK to `domains`, keyed by `(domain_id, version)`): one immutable row per build across UI / API / scheduler paths; "active" build derived as the most recent successful run.
 - `record_build_run` / `load_build_runs` / `build_analytics` on the store + `RegistryService` facade; wired into `_build_pipeline` (success / early-complete / error / cancel / phase-failure) and the scheduler.
-- `GET /settings/build-runs/{domain}` and `GET /settings/build-analytics/{domain}`; a Registry → Automation **Build Analytics** panel (domain + version selectors, summary cards, runs table with the active build highlighted) and a per-domain **Runs** tab.
+- **[Audit]** `GET /settings/build-runs/{domain}` and `GET /settings/build-analytics/{domain}`; a Registry → Automation **Build Analytics** panel (domain + version selectors, summary cards, runs table with the active build highlighted) and a per-domain **Runs** tab.
 
 ## Graph DB / Registry Lakebase Separation
 
