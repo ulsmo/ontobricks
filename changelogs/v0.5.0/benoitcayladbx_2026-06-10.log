@@ -478,6 +478,45 @@ loader had used a `bi-hourglass` glyph before being switched to the brand spinne
 
 **Test result**: Rules/docs-only change — no code touched, no tests required.
 
+## UI: match Databricks (apps-v2) navbar text size
+
+**Context**: Requested the navbar to reuse the same font/size as the Databricks apps-v2
+top nav. Per the no-webfont rule (`.cursor/11-frontend-design.mdc`), we keep the system
+font stack and match the **size/weight only**: Databricks renders top-nav text at ~13px,
+weight 400.
+
+**Changes**:
+1. `src/front/static/global/css/main.css` — set `.navbar .nav-link` to
+   `font-size: 0.8125rem` (13px) / `font-weight: 400`, and pinned the inner Bootstrap
+   `.small` menu-label span to `font-size: 1em` so labels land at 13px (they were being
+   shrunk to ~11px by `.small`'s 0.875em). Dropdown menu items
+   (`.navbar .dropdown-menu .dropdown-item`) reduced from `0.875rem` to `0.8125rem` to
+   match. Brand size left unchanged.
+
+**Modified files**:
+- `src/front/static/global/css/main.css`
+
+**Test result**: CSS-only change; no lint errors. Hard refresh / dev-server restart needed
+to bust the cached `?v=` asset.
+
+## UI: non-bold text in the navbar and menus
+
+**Context**: Requested a lighter, non-bold text style across the navbar and its dropdown
+menus.
+
+**Changes**:
+1. `src/front/static/global/css/main.css` — dropped `font-weight: 600` to `400` on
+   `.navbar-brand`, `.navbar .nav-link.active`, and `.navbar .dropdown-menu
+   .dropdown-header`. The active nav item still reads as active via its `--db-primary`
+   colour; dropdown headers stay distinguishable via their muted colour, uppercase and
+   letter-spacing. Dropdown items were already normal weight.
+
+**Modified files**:
+- `src/front/static/global/css/main.css`
+
+**Test result**: CSS-only change; no lint errors. Hard refresh / dev-server restart needed
+to bust the cached `?v=` asset.
+
 ## UI: restore icon-to-label spacing in navbar menu items
 
 **Context**: Making `.nav-link` a flexbox (previous change) collapsed the whitespace

@@ -97,7 +97,7 @@ body {
 
 .navbar .dropdown-menu .dropdown-item {
     color: var(--db-text);
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     padding: 0.4rem 1rem;
     transition: background-color 0.15s ease, color 0.15s ease;
     border-radius: 0.25rem;
@@ -128,7 +128,7 @@ body {
 .navbar .dropdown-menu .dropdown-header {
     color: var(--db-text-muted);
     font-size: 0.7rem;
-    font-weight: 600;
+    font-weight: 400;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     padding: 0.45rem 1rem 0.2rem;
@@ -166,7 +166,7 @@ body {
 
 .navbar-brand {
     color: var(--db-text) !important;
-    font-weight: 600;
+    font-weight: 400;
     font-size: 1.25rem;
 }
 
@@ -188,6 +188,15 @@ body {
     gap: 0.4rem;
     transition: var(--db-transition-fast);
     white-space: nowrap;
+    /* Match the Databricks (apps-v2) top-nav text size: 13px, weight 400. */
+    font-size: 0.8125rem;
+    font-weight: 400;
+}
+
+/* Menu labels in the navbar carry Bootstrap's .small (0.875em), which would
+   shrink them below the 13px target — pin them to the nav-link size instead. */
+.navbar .nav-link .small {
+    font-size: 1em;
 }
 
 .navbar .nav-link .bi {
@@ -202,7 +211,7 @@ body {
 
 .navbar .nav-link.active {
     color: var(--db-primary) !important;
-    font-weight: 600;
+    font-weight: 400;
 }
 
 /* Disabled navigation items (requires domain saved to UC) */
