@@ -84,7 +84,7 @@
 .detail-panel-resize-handle {
     width: 8px;
     cursor: col-resize;
-    background: #e9ecef;
+    background: #ffffff;
     display: none;
     align-items: center;
     justify-content: center;
@@ -156,7 +156,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 0.6rem 0.75rem;
-    background: #f8f9fa;
+    background: #ffffff;
     border-bottom: 1px solid #dee2e6;
     flex-shrink: 0;
 }
@@ -256,7 +256,7 @@
     justify-content: space-between;
     gap: 0.5rem;
     padding: 0.6rem 0.75rem;
-    background: #f8f9fa;
+    background: #ffffff;
     border-top: 1px solid #dee2e6;
     flex-shrink: 0;
 }

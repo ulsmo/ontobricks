@@ -55,7 +55,7 @@
       data-page="{% block page_id %}{% endblock %}">
     
     <!-- Navigation (driven by menu_config.json) -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
+    <nav class="navbar navbar-expand-lg navbar-light">
         <div class="container-fluid">
             <a class="navbar-brand d-flex align-items-center" href="{{ menu_config.brand.route }}">
                 <img id="brandLogoImg" src="{{ url_for('static', filename='global/img/favicon.svg') }}?v=2" alt="{{ menu_config.brand.label }}" width="24" height="24" class="me-2">
@@ -70,12 +70,12 @@
                     {% for menu in menu_config.menus %}
                     {% if not menu.navbar_hidden|default(false) %}
                     <li class="nav-item nav-chevron" aria-hidden="true">
-                        <svg viewBox="0 0 12 40" preserveAspectRatio="none"><polyline points="0,0 10,20 0,40" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/></svg>
+                        <svg viewBox="0 0 12 40" preserveAspectRatio="none"><polyline points="0,0 10,20 0,40" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
                     </li>
                     <li class="nav-item dropdown">
                         {% if menu.id == 'domain' %}
                         <a class="nav-link dropdown-toggle" href="#" id="domainDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi {{ menu.icon }}"></i> <span id="currentDomainName" class="text-light small">{{ menu.label }}</span>
+                            <i class="bi {{ menu.icon }}"></i> <span id="currentDomainName" class="small">{{ menu.label }}</span>
                         </a>
                         <ul class="dropdown-menu" aria-labelledby="domainDropdown" id="domainDropdownMenu">
                             {% for action in menu.navbar_actions %}
@@ -118,7 +118,7 @@
                         </ul>
                         {% else %}
                         <a class="nav-link dropdown-toggle{% if menu.requires_domain_saved %} nav-requires-domain{% endif %}" href="#" id="{{ menu.id }}Dropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi {{ menu.icon }}"></i> <span class="text-light small">{{ menu.label }}</span>
+                            <i class="bi {{ menu.icon }}"></i> <span class="small">{{ menu.label }}</span>
                         </a>
                         <ul class="dropdown-menu" aria-labelledby="{{ menu.id }}Dropdown">
                             {% if menu.navbar_actions|default([])|length > 0 %}

@@ -76,7 +76,7 @@
 }
 
 .help-modal-footer {
-    background: #fafafa;
+    background: #ffffff;
     border-top: 1px solid #e5e7eb;
 }
 
@@ -91,7 +91,7 @@
 
 .help-sidebar {
     flex: 0 0 230px;
-    background: #fafafa;
+    background: #ffffff;
     border-right: 1px solid #e5e7eb;
     padding: 1rem 0.5rem;
     overflow-y: auto;
@@ -314,7 +314,7 @@
 .help-step {
     flex: 1 1 140px;
     min-width: 0;
-    background: #fafafa;
+    background: #ffffff;
     border: 1px solid #e5e7eb;
     border-top: 3px solid #dc2626;
     border-radius: 10px;
@@ -376,7 +376,7 @@
     gap: 1rem;
     padding: 1rem 1.2rem;
     border-left: 4px solid #dc2626;
-    background: #fafafa;
+    background: #ffffff;
     border-radius: 8px;
     align-items: flex-start;
 }
@@ -398,7 +398,7 @@
 
 .help-step-optional {
     border-left-style: dashed;
-    background: #fafafa;
+    background: #ffffff;
     opacity: 0.97;
 }
 
@@ -522,7 +522,7 @@
 .help-accordion .accordion-body {
     font-size: 0.92rem;
     color: #27272a;
-    background: #fafafa;
+    background: #ffffff;
     border-left: 3px solid #dc2626;
 }
 
@@ -708,7 +708,7 @@
 
 .help-docs-index {
     border-right: 1px solid #e5e7eb;
-    background: #fafbfc;
+    background: #ffffff;
     overflow-y: auto;
     padding: 1rem 0.75rem;
 }
@@ -762,7 +762,7 @@
 }
 
 .help-docs-nav .help-docs-link:hover {
-    background: #f3f4f6;
+    background: #ffffff;
     color: #111827;
 }
 
@@ -884,7 +884,7 @@
 .help-docs-rendered code {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.85em;
-    background: #f3f4f6;
+    background: #ffffff;
     color: #b91c1c;
     padding: 0.12em 0.4em;
     border-radius: 4px;
@@ -942,12 +942,12 @@
 }
 
 .help-docs-rendered thead th {
-    background: #f9fafb;
+    background: #ffffff;
     font-weight: 600;
 }
 
 .help-docs-rendered tbody tr:nth-child(even) {
-    background: #fafbfc;
+    background: #ffffff;
 }
 
 .help-docs-rendered img {
@@ -966,7 +966,7 @@
 }
 
 .help-docs-rendered kbd {
-    background: #f3f4f6;
+    background: #ffffff;
     border: 1px solid #d1d5db;
     border-bottom-width: 2px;
     border-radius: 4px;

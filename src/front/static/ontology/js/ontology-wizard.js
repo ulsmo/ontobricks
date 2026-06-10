@@ -994,7 +994,7 @@ function renderAgentStepsLog(steps) {
             <summary class="small text-muted" style="cursor:pointer;">
                 <i class="bi bi-robot me-1"></i>Agent activity log (${steps.length} steps)
             </summary>
-            <div class="border rounded p-2 mt-1" style="max-height:180px; overflow-y:auto; background:#fafafa;">
+            <div class="border rounded p-2 mt-1" style="max-height:180px; overflow-y:auto; background:#ffffff;">
                 ${rows.join('')}
             </div>
         </details>`;

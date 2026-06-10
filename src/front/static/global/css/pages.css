@@ -13,7 +13,7 @@
 }
 
 .rich-grid th {
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    background: #ffffff;
     padding: 0.5rem 0.75rem;
     text-align: left;
     font-weight: 600;
@@ -28,7 +28,7 @@
 }
 
 .rich-grid th:hover {
-    background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+    background: #ffffff;
 }
 
 .rich-grid th .sort-icon {
@@ -65,7 +65,7 @@
 }
 
 .rich-grid tr:hover td {
-    background: #f8f9fa;
+    background: #ffffff;
 }
 
 .rich-grid .uri-cell {
@@ -361,7 +361,7 @@
 }
 
 .workflow-card .card-reset-btn:hover {
-    background: #e9ecef;
+    background: #ffffff;
     color: #212529;
     border-color: #495057;
 }
@@ -449,7 +449,7 @@
    Home Page - Project Management Panel
    ========================================================================== */
 .domain-panel {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    background: #ffffff;
     border-radius: 16px;
     padding: 1.5rem;
     border: 2px solid var(--db-border);
@@ -728,7 +728,7 @@
     transition: background-color 0.2s ease;
 }
 .notif-item:hover {
-    background-color: #f8f9fa;
+    background-color: #ffffff;
 }
 @keyframes notifFlash {
     0%   { transform: scale(1); }
@@ -921,7 +921,7 @@
     height: 600px;
     border: 1px solid var(--db-border-light);
     border-radius: 8px;
-    background-color: #fafafa;
+    background-color: #ffffff;
 }
 
 /* Smaller graph container variant */
@@ -1159,7 +1159,7 @@
     line-height: 1.5;
     max-height: 75vh;
     overflow: auto;
-    background: #f8f9fa;
+    background: #ffffff;
     color: #000000;
     white-space: pre-wrap;
     word-break: break-word;
@@ -1177,7 +1177,7 @@
 .doc-preview-md h4 { font-size: 1.1rem; margin-top: 1rem; }
 .doc-preview-md h5 { font-size: 1rem; margin-top: 0.8rem; }
 .doc-preview-md code {
-    background: #f0f0f0;
+    background: #ffffff;
     padding: 0.15em 0.4em;
     border-radius: 3px;
     font-size: 0.85em;
