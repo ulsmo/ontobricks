@@ -183,11 +183,18 @@ class TestHomePage:
         assert _find(_tags(html), id_="sessionPanel") is not None
         assert _find(_tags(html), id_="homeDomainName") is not None
 
-    def test_stat_items(self, client):
+    def test_kpi_band(self, client):
         html = _html(client, "/")
-        assert _find(_tags(html), id_="classCount") is not None
-        assert _find(_tags(html), id_="propCount") is not None
-        assert _find(_tags(html), id_="mappingCount") is not None
+        assert _find(_tags(html), id_="kpiEntities") is not None
+        assert _find(_tags(html), id_="kpiRelationships") is not None
+        assert _find(_tags(html), id_="kpiMappings") is not None
+        assert _find(_tags(html), id_="kpiQuality") is not None
+        assert _find(_tags(html), id_="kpiStatus") is not None
+        assert _find(_tags(html), id_="kpiVersion") is not None
+
+    def test_domain_gateway(self, client):
+        html = _html(client, "/")
+        assert _find(_tags(html), id_="domainGateway") is not None
 
     def test_quick_links(self, client):
         html = _html(client, "/")

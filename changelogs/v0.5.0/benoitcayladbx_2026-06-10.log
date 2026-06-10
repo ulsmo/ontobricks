@@ -300,6 +300,163 @@ centered vertically (links sat toward the top of their stretched list items).
 **Test result**: CSS-only change; no lint errors. Hard refresh / dev-server restart needed
 to pick up the change.
 
+## UI: business-user home page reshape (KPI band + All Domains gateway)
+
+**Context**: The home page was builder/jargon-first (hero tagline "...RDF, OWL, and
+R2RML standards", a Save/Load/Reset domain panel, a 3-step build workflow, and three
+OWL/R2RML/Digital-Twin info cards). Requested a reshape "really for a business user".
+Confirmed direction: the home is the **open door for all domains** and **KPIs are the
+priority content** (not a per-user role-gated view — roles belong to domains). Pure
+front-end change reusing existing cheap endpoints (`/domain/info`, `/session-status`,
+`/list-projects`); no backend changes.
+
+**Changes**:
+1. `src/front/templates/home.html` — restructured into five sections:
+   (1) value-first hero ("Explore and govern your organization's knowledge…");
+   (2) **Current Domain KPI / health band** — a 6-tile `.ob-kpi-tile` row (Entities,
+   Relationships, Mappings, Quality, Status, Version) replacing the old 3 `.stat-item`
+   tiles; (3) **All Domains** gateway grid (`#domainGateway` / `.ob-domain-grid`) — the
+   open door to every domain; (4) My Tasks (unchanged); (5) a demoted **Build & Manage**
+   section that folds the Step 1/2/3 workflow cards and the New/Manage/Data Sources/
+   Save/Load buttons. Dropped the jargon-heavy OWL/R2RML/Digital-Twin info cards. Wired
+   the new `home/css/home.css` in `extra_css`.
+2. `src/front/static/home/css/home.css` (new) — `.home-kpi-band` grid, `.ob-domain-grid`
+   / `.ob-domain-card` gateway styles (with `.is-current` highlight + empty-state CTA),
+   and the `.home-build-header` row. All colours via `--db-*` tokens; KPI tiles reuse the
+   shared `.ob-kpi-tile` component.
+3. `src/front/static/home/js/home.js` — rewrote: `loadHomeStatus()` fetches `/domain/info`
+   (status, version, precision score, stats) + `/session-status` in parallel and renders
+   the six KPI tiles (Quality tile colours by precision threshold: ≥80 success / ≥50
+   warning / else danger; Status tile renders a DRAFT/IN-REVIEW/PUBLISHED badge);
+   `loadDomainGateway()` fetches `/list-projects`, renders one card per domain (current
+   domain highlighted) and opens a domain via `POST /domain/load-from-uc` (latest/active
+   version) then routes to `/domain/`; the `data-action` handler is now delegated from
+   `document` so New/Save/Load/Reset keep working from the demoted section.
+4. `src/front/static/global/css/pages.css` — removed the now-unused `.session-stats` /
+   `.stat-item*` and `.info-cards` / `.info-card*` rules (and the `.domain-panel
+   .session-stats` spacing rule) superseded by the KPI band.
+5. `tests/units/api/test_ui_rendering.py` — replaced `test_stat_items` (asserted the old
+   `classCount` / `propCount` / `mappingCount` ids) with `test_kpi_band` (the six new
+   `kpi*` ids) and added `test_domain_gateway` (`#domainGateway`).
+
+**Modified files**:
+- `src/front/templates/home.html`
+- `src/front/static/home/css/home.css` (new)
+- `src/front/static/home/js/home.js`
+- `src/front/static/global/css/pages.css`
+- `tests/units/api/test_ui_rendering.py`
+
+**Test result**: `python -m pytest tests/units` → **2267 passed, 15 skipped**. No lint
+errors on the edited assets. Hard refresh / dev-server restart needed to bust the cached
+`?v=` assets.
+
+## UI: remove the "Build & Manage" section from the home page
+
+**Context**: Follow-up to the business-user home reshape — the demoted "Build & Manage"
+section (the New / Manage / Data Sources / Save / Load buttons and the Step 1/2/3
+workflow cards) was no longer wanted on the home page. The home now ends at the All
+Domains gateway + My Tasks; building/managing happens from the navbar Domain menu and
+the per-area pages.
+
+**Changes**:
+1. `src/front/templates/home.html` — deleted the entire "Build & Manage" `.workflow-section`
+   (header + `.domain-actions` buttons + the three `.workflow-card`s).
+2. `src/front/static/home/js/home.js` — removed the now-dead `updateWorkflowStatus()`
+   (and its call in `loadHomeStatus`), `resetTaxonomy()`, `resetMapping()`, and the
+   `domainSave` / `domainLoad` / `resetTaxonomy` / `resetMapping` branches of the delegated
+   click handler. `newDomain()` is kept (the gateway empty-state "Create your first domain"
+   CTA still uses `data-action="newDomain"`), so `onHomePanelClick` now handles only that.
+3. `src/front/static/home/css/home.css` — removed the `.home-build-header` rules.
+4. `src/front/static/global/css/pages.css` — removed the now-unused home workflow-card
+   block (`.workflow-card*`, `.step-badge`, `.card-icon`, `.card-status*`, `.card-actions`,
+   `.card-action*`, `.card-reset-btn*`) and the `.domain-actions*` / `.domain-btn*` blocks
+   (incl. their responsive rule). Kept `.workflow-section` / `.workflow-section h5` (still
+   used by the All Domains and My Tasks sections) and `.domain-status*` (used by the
+   Current Domain panel status line).
+
+**Modified files**:
+- `src/front/templates/home.html`
+- `src/front/static/home/js/home.js`
+- `src/front/static/home/css/home.css`
+- `src/front/static/global/css/pages.css`
+
+**Test result**: `python -m pytest tests/units` → **2267 passed, 15 skipped**. No lint
+errors on the edited assets. Hard refresh / dev-server restart needed to bust the cached
+`?v=` assets.
+
+## UI fixup: home All Domains gateway — wrong endpoint + brand spinner
+
+**Context**: On the live dev server the home "All Domains" gateway showed "No domains"
+even though many exist. Root cause: the gateway fetched `/list-projects`, but that route
+is mounted under the `/domain` prefix, so it 404'd (`GET /list-projects → 404` in the
+server log). The navbar's own loader already uses the correct `/domain/list-projects`.
+Also requested: use the usual (OntoBricks brand) spinner while the section loads instead
+of the placeholder hourglass + text.
+
+**Changes**:
+1. `src/front/static/home/js/home.js` — `loadDomainGateway()` now fetches
+   `/domain/list-projects` (was `/list-projects`). Response shape is unchanged
+   (`{success, domains: [names]}`).
+2. `src/front/templates/home.html` — the gateway loading placeholder now uses a Bootstrap
+   `.spinner-border` (globally repainted to the OntoBricks brand spinner via
+   `main.css`) + "Loading domains..." text, instead of the `bi-hourglass-split` glyph.
+
+**Modified files**:
+- `src/front/static/home/js/home.js`
+- `src/front/templates/home.html`
+
+**Test result**: `python -m pytest tests/units/api/test_ui_rendering.py` → **109 passed**.
+No lint errors. Verified against the running dev server log that `/domain/list-projects`
+returns 200 (the navbar uses the same path). Hard refresh / dev-server restart needed to
+bust the cached `?v=` assets.
+
+## UI: navbar Digital Twin icon + per-domain version dropdown on the home gateway
+
+**Context**: Two small home/navbar tweaks. (1) The navbar "Digital Twin" entry used the
+filled `bi-box-fill` glyph; requested the outline variant. (2) The home "All Domains"
+gateway cards should let the user pick which version to open per domain.
+
+**Changes**:
+1. `src/front/config/menu_config.json` — `digitaltwin` menu `icon` changed from
+   `bi-box-fill` to `bi-box` (outline). Only occurrence; menu icons are declarative so the
+   navbar/sidebar both pick it up.
+2. `src/front/static/home/js/home.js` — each gateway card is now a `<div>` (was a
+   `<button>`, which can't legally contain a `<select>`) with a footer holding a version
+   `<select>` + an explicit **Open** button. Versions are **lazy-loaded** on first card
+   hover / select focus via `/domain/list-versions?domain_name=…` (avoids one slow
+   registry call per domain on page load), sorted latest-first and labelled
+   `v{n} — {Draft|In Review|Published}`. `openDomain(name, version)` now sends the chosen
+   version (falls back to latest/active when the dropdown is left on "Latest").
+3. `src/front/static/home/css/home.css` — added `.ob-domain-card-footer` (select + Open
+   button row), `.ob-domain-version` sizing, restyled `.ob-domain-card-open` as a compact
+   primary button, moved the "Current" badge to the right of the card's top row, and
+   dropped the whole-card `cursor: pointer` (the card is no longer one big click target).
+
+**Modified files**:
+- `src/front/config/menu_config.json`
+- `src/front/static/home/js/home.js`
+- `src/front/static/home/css/home.css`
+
+**Test result**: `python -m pytest tests/units/api/test_ui_rendering.py` → **109 passed**.
+No lint errors. Hard refresh / dev-server restart needed to bust the cached `?v=` assets.
+
+## UI: stronger highlight for the current domain in the home gateway
+
+**Context**: The current domain card in the "All Domains" gateway only had a coloured
+border + "Current" badge; requested a more obvious highlight.
+
+**Changes**:
+1. `src/front/static/home/css/home.css` — `.ob-domain-card.is-current` now also gets a
+   tinted background (`--db-primary-light`), and its icon chip is filled with
+   `--db-primary` (white glyph), on top of the existing accent border, shadow and
+   "Current" badge.
+
+**Modified files**:
+- `src/front/static/home/css/home.css`
+
+**Test result**: CSS-only change; no lint errors. Hard refresh / dev-server restart needed
+to bust the cached `?v=` asset.
+
 ## UI: restore icon-to-label spacing in navbar menu items
 
 **Context**: Making `.nav-link` a flexbox (previous change) collapsed the whitespace
