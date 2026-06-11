@@ -94,3 +94,28 @@ entries, so those orphans surfaced — making the two views disagree.
 
 **Test result**: `pytest tests/units/registry/test_review_service.py
 tests/units/api/test_review_endpoints.py` → **61 passed**. No new lint errors.
+
+## Polish: Ontology Designer detail-panel resize handle
+
+**Context**: On the Ontology page, the right-side detail panel (entity /
+relationship editor) is resizable via a draggable left border. The handle was
+an 8px white strip with thin left + right borders and a small 40px grey nub
+floating in the middle — the divider line had no clean top/bottom termination
+and the grip looked unfinished. Requested a more beautiful treatment.
+
+**Changes**:
+1. `src/front/static/ontology/css/ontology-shared-panels.css` —
+   `.detail-panel-resize-handle` reworked: transparent 11px hit area with a
+   full-height hairline divider drawn via `::before` (top:0 / bottom:0), so the
+   border now has clean top & bottom ends spanning the whole panel. On
+   hover/active the divider thickens to 2px and turns brand-primary. The grip
+   `.resize-bar` became a rounded pill (5px wide, `border-radius:999px`) with a
+   soft drop shadow that grows (46px → 64px) and turns primary on hover/active.
+   Removed the now-redundant `border-left` on `.shared-detail-panel` to avoid a
+   double line next to the handle's divider.
+
+**Modified files**:
+- `src/front/static/ontology/css/ontology-shared-panels.css`
+
+**Test result**: CSS-only change (no Python touched). No new lint errors on the
+edited file.
