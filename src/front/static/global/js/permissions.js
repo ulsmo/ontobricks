@@ -169,7 +169,15 @@
      * resolution and the user can do everything anyway.
      */
     function applyRoleIndicators() {
-        if (!isAppMode) return;
+        // Local-dev mode: there is no real permission resolution and every
+        // caller is treated as admin server-side. The pill is always laid out
+        // (Bootstrap's ``.d-flex`` on ``#roleNavBadgeItem`` wins over the
+        // ``display:none`` base rule), so without this we'd leave the raw
+        // ``ROLE`` placeholder on screen. Render it as ADMIN instead.
+        if (!isAppMode) {
+            showRoleNavBadge('admin');
+            return;
+        }
 
         const role = effectiveRole();
         if (!role) return;

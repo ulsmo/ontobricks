@@ -119,3 +119,51 @@ and the grip looked unfinished. Requested a more beautiful treatment.
 
 **Test result**: CSS-only change (no Python touched). No new lint errors on the
 edited file.
+
+## Polish: Navbar role badge colour (red → dark grey)
+
+**Context**: The effective-role pill in the navbar (ADMIN / BUILDER / EDITOR /
+VIEWER) was rendered in red (`#dc3545`), which read as an error/alert. Requested
+a calmer dark grey instead.
+
+**Changes**:
+1. `src/front/static/global/css/permissions.css` — `#roleNavBadge`
+   `background-color` changed from `#dc3545` to `#343a40` (Bootstrap dark grey).
+   Text stays white. JS (`permissions.js`) only sets the label/tooltip, so this
+   single rule controls the colour.
+
+**Modified files**:
+- `src/front/static/global/css/permissions.css`
+
+**Test result**: CSS-only change (no Python touched). No new lint errors on the
+edited file.
+
+## Fix: Navbar role badge showed raw "ROLE" placeholder in local-dev
+
+**Context**: Running locally the navbar role pill displayed the literal
+placeholder text `ROLE` instead of `ADMIN`. Root cause: the `<li
+id="roleNavBadgeItem">` in `base.html` carries Bootstrap's `.d-flex`
+(`display:flex !important`), which beats the non-`!important`
+`#roleNavBadgeItem { display:none }` base rule — so the pill is always laid out.
+In local-dev mode `is_app_mode()` is false, so `applyRoleIndicators()`
+early-returned and never called `showRoleNavBadge()`, leaving the server-rendered
+`ROLE` placeholder visible. Local dev treats every caller as admin server-side,
+so the pill should read `ADMIN`.
+
+**Changes**:
+1. `src/front/static/global/js/permissions.js` — `applyRoleIndicators()` now
+   renders the pill as `admin` when not in app mode (local dev), instead of
+   returning early. App-mode behaviour (effective-role resolution + viewer
+   lockdown) is unchanged.
+2. `src/front/static/global/css/permissions.css` — `#roleNavBadgeItem`
+   base rule made `display: none !important` so it beats the `.d-flex` on the
+   same element. This also prevents the `ROLE` placeholder from leaking for an
+   app-mode caller whose effective role is empty (badge stays hidden until
+   `.is-visible` is flipped).
+
+**Modified files**:
+- `src/front/static/global/js/permissions.js`
+- `src/front/static/global/css/permissions.css`
+
+**Test result**: Front-end only (no Python touched). No new lint errors on the
+edited files.

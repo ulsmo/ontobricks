@@ -304,8 +304,10 @@ body:is(.read-only-version, .role-viewer) .btn.disabled {
    colour / sizing live here (rule §4: no inline CSS in templates).
    ========================================================================== */
 
+/* ``!important`` so this beats Bootstrap's ``.d-flex`` on the same element —
+   otherwise the raw ``ROLE`` placeholder leaks before/without JS resolution. */
 #roleNavBadgeItem {
-    display: none;
+    display: none !important;
 }
 
 #roleNavBadgeItem.is-visible {
@@ -313,7 +315,7 @@ body:is(.read-only-version, .role-viewer) .btn.disabled {
 }
 
 #roleNavBadge {
-    background-color: #dc3545;
+    background-color: #343a40;
     color: #fff;
     padding: 0.4rem 0.75rem;
     font-size: 0.75rem;
