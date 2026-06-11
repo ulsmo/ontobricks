@@ -546,6 +546,102 @@ def test_publish_meta_records_no_override_when_quorum_met():
 
 
 # ----------------------------------------------------------------------
+# Domain access roster (review_team)
+# ----------------------------------------------------------------------
+
+
+def _call_team(entries, *, users=None, groups=None):
+    """Invoke review_team with mocked app principals + per-domain entries.
+
+    ``users`` / ``groups`` model the Databricks App ACL
+    (``list_app_principals``); ``entries`` model the per-domain
+    ``.domain_permissions.json`` rows.
+    """
+    domain = MagicMock()
+    app_principals = {"users": list(users or []), "groups": list(groups or [])}
+    with (
+        patch.object(_mod, "get_domain", return_value=domain),
+        patch.object(
+            _mod.RegistryCfg, "from_domain",
+            return_value=MagicMock(as_dict=lambda: {"catalog": "c", "schema": "s"}),
+        ),
+        patch(
+            "back.core.helpers.get_databricks_host_and_token",
+            return_value=("https://host", "tok"),
+        ),
+        patch.object(
+            _mod.permission_service, "list_app_principals",
+            return_value=app_principals,
+        ),
+        patch.object(
+            _mod.permission_service, "list_domain_entries",
+            return_value=entries,
+        ),
+    ):
+        return ReviewService.review_team(
+            _request(), MagicMock(), MagicMock(), "acme"
+        )
+
+
+def test_review_team_sorts_by_role_then_name():
+    users = [
+        {"email": "v@a.com", "display_name": "Viewer One"},
+        {"email": "b@a.com", "display_name": "Builder One"},
+        {"email": "e@a.com", "display_name": "Editor One"},
+    ]
+    entries = [
+        {"principal": "v@a.com", "role": ROLE_VIEWER},
+        {"principal": "b@a.com", "role": ROLE_BUILDER},
+        {"principal": "e@a.com", "role": ROLE_EDITOR},
+    ]
+    result = _call_team(entries, users=users)
+    assert result["success"] is True
+    assert result["domain"] == "acme"
+    assert [m["role"] for m in result["members"]] == [
+        ROLE_BUILDER, ROLE_EDITOR, ROLE_VIEWER
+    ]
+
+
+def test_review_team_filters_non_assignable_roles():
+    users = [
+        {"email": "admin@a.com", "display_name": "Admin"},
+        {"email": "v@a.com", "display_name": "Viewer"},
+    ]
+    entries = [
+        {"principal": "admin@a.com", "role": ROLE_ADMIN},
+        {"principal": "v@a.com", "role": ROLE_VIEWER},
+    ]
+    result = _call_team(entries, users=users)
+    assert [m["principal"] for m in result["members"]] == ["v@a.com"]
+
+
+def test_review_team_excludes_entries_without_app_principal():
+    """Orphan .domain_permissions.json entries (no App ACL row) are hidden,
+    matching the Registry → Teams matrix."""
+    users = [{"email": "known@a.com", "display_name": "Known"}]
+    entries = [
+        {"principal": "known@a.com", "role": ROLE_EDITOR},
+        {"principal": "ghost@a.com", "role": ROLE_BUILDER},  # not an app principal
+    ]
+    result = _call_team(entries, users=users)
+    assert [m["principal"] for m in result["members"]] == ["known@a.com"]
+
+
+def test_review_team_includes_groups():
+    groups = [{"display_name": "data-eng"}]
+    entries = [{"principal": "data-eng", "role": ROLE_EDITOR}]
+    result = _call_team(entries, groups=groups)
+    assert result["members"][0]["principal"] == "data-eng"
+    assert result["members"][0]["principal_type"] == "group"
+    assert result["members"][0]["display_name"] == "data-eng"
+
+
+def test_review_team_requires_folder():
+    with pytest.raises(ValidationError):
+        ReviewService.review_team(_request(), MagicMock(), MagicMock(), "")
+
+
+# ----------------------------------------------------------------------
 # My Tasks — cross-domain worklist of pending review actions
 # ----------------------------------------------------------------------
 

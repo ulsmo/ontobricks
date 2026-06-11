@@ -61,6 +61,7 @@
             state.detail = detail;
             render(detail);
             loadReadiness();
+            loadTeam();
         } catch (err) {
             console.error('loadReview error:', err);
             showNotification('Could not load review status: ' + err.message, 'error');
@@ -77,7 +78,7 @@
             statusBanner(d) +
             lifecycleDiagram(d) +
             '<div class="row g-3">' +
-            '<div class="col-lg-6">' + consistencyCard() + '</div>' +
+            '<div class="col-lg-6">' + consistencyCard() + teamCard() + '</div>' +
             '<div class="col-lg-6">' + timelineCard(d) + '</div>' +
             '</div>';
 
@@ -312,6 +313,95 @@
                 : '<i class="bi bi-x-circle-fill text-danger"></i>');
         return '<div class="review-check d-flex align-items-center gap-2 mb-1">' +
             icon + '<span class="small">' + escapeHtml(label) + '</span></div>';
+    }
+
+    /* ── Domain access (who can view / edit / build) ───── */
+    function teamCard() {
+        return '<div class="card review-card mb-3"><div class="card-body">' +
+            '<h6 class="card-title"><i class="bi bi-people me-2"></i>Domain access</h6>' +
+            '<p class="text-muted small mb-3">People and groups with a role on ' +
+            'this domain. Roles are managed by administrators in ' +
+            'Registry &rarr; Teams.</p>' +
+            '<div id="reviewTeam">' + spinner('Loading members...') + '</div>' +
+            '</div></div>';
+    }
+
+    const ROLE_META = {
+        builder: {
+            label: 'Builder', icon: 'tools',
+            cls: 'bg-primary-subtle text-primary-emphasis border-primary',
+            desc: 'Can edit, build and publish',
+        },
+        editor: {
+            label: 'Editor', icon: 'pencil-square',
+            cls: 'bg-info-subtle text-info-emphasis border-info',
+            desc: 'Can edit the model',
+        },
+        viewer: {
+            label: 'Viewer', icon: 'eye',
+            cls: 'bg-secondary-subtle text-secondary-emphasis border-secondary',
+            desc: 'Read-only access',
+        },
+    };
+    const ROLE_ORDER = ['builder', 'editor', 'viewer'];
+
+    async function loadTeam() {
+        const el = document.getElementById('reviewTeam');
+        if (!el) return;
+        try {
+            const d = await (await fetch(
+                '/review/' + encodeURIComponent(state.folder) + '/' +
+                encodeURIComponent(state.version) + '/team',
+                { credentials: 'same-origin' }
+            )).json();
+            const members = (d && d.members) || [];
+            if (!members.length) {
+                el.innerHTML = '<div class="text-muted small">' +
+                    'No members assigned yet — only administrators can ' +
+                    'access this domain.</div>';
+                return;
+            }
+            const byRole = {};
+            members.forEach((m) => {
+                (byRole[m.role] = byRole[m.role] || []).push(m);
+            });
+            el.innerHTML = ROLE_ORDER
+                .filter((r) => byRole[r] && byRole[r].length)
+                .map((r) => roleGroup(r, byRole[r]))
+                .join('');
+        } catch (err) {
+            el.innerHTML =
+                '<div class="text-muted small">Member list unavailable.</div>';
+        }
+    }
+
+    function roleGroup(role, members) {
+        const meta = ROLE_META[role] || {
+            label: role, icon: 'person', cls: 'bg-light text-dark border',
+            desc: '',
+        };
+        return '<div class="review-role-group mb-3">' +
+            '<div class="review-role-head d-flex align-items-center gap-2 mb-1">' +
+            '<span class="badge border ' + meta.cls + '">' +
+            '<i class="bi bi-' + meta.icon + ' me-1"></i>' +
+            escapeHtml(meta.label) + '</span>' +
+            '<span class="text-muted small">' + escapeHtml(meta.desc) +
+            ' &middot; ' + members.length + '</span></div>' +
+            '<div class="review-people">' +
+            members.map(memberChip).join('') + '</div></div>';
+    }
+
+    function memberChip(m) {
+        const name = m.display_name || m.principal || '';
+        const principal = m.principal || name;
+        const avatar = m.principal_type === 'group'
+            ? '<span class="review-avatar review-avatar-group">' +
+              '<i class="bi bi-people-fill"></i></span>'
+            : '<span class="review-avatar">' +
+              escapeHtml(initialsOf(principal)) + '</span>';
+        return '<span class="review-person" title="' + escapeHtml(principal) +
+            '">' + avatar + '<span class="review-person-name">' +
+            escapeHtml(shortName(name)) + '</span></span>';
     }
 
     /* ── Actions (surfaced in the header) ──────────── */

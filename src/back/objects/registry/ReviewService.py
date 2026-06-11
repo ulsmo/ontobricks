@@ -39,6 +39,7 @@ from back.core.errors import (
 from back.core.logging import get_logger
 from back.objects.registry.RegistryService import RegistryCfg, RegistryService
 from back.objects.registry.PermissionService import (
+    ASSIGNABLE_ROLES,
     ROLE_ADMIN,
     ROLE_NONE,
     ROLE_VIEWER,
@@ -238,6 +239,91 @@ class ReviewService:
             raise InfrastructureError(
                 "Failed to load review detail", detail=str(exc)
             ) from exc
+
+    @staticmethod
+    def review_team(
+        request,
+        session_mgr: SessionManager,
+        settings,
+        folder: str,
+    ) -> Dict[str, Any]:
+        """Domain access list — principals and their role on *folder*.
+
+        Read-only summary surfaced on the Validation page so reviewers can
+        see who can view / edit / build the domain.
+
+        Uses the **same source as the Registry → Teams matrix**: rows come
+        from the Databricks App principals (``list_app_principals``) and the
+        role from the per-domain registry permissions
+        (``list_domain_entries``). A principal appears here only if it is a
+        known app principal *and* has an assignable role on this domain —
+        i.e. exactly the "filled cells" of the domain's column in the Teams
+        matrix. This avoids surfacing orphan ``.domain_permissions.json``
+        entries (principals no longer in the App ACL) that the Teams page
+        does not show. Members are returned most-privileged first.
+        """
+        _ = request  # identity is not needed; the list is the same for any member
+        if not folder:
+            raise ValidationError("domain is required")
+        try:
+            from back.core.helpers import get_databricks_host_and_token
+
+            domain = get_domain(session_mgr)
+            host, token = get_databricks_host_and_token(domain, settings)
+            registry_cfg = RegistryCfg.from_domain(domain, settings).as_dict()
+            app_name = settings.ontobricks_app_name
+            app_principals = permission_service.list_app_principals(
+                host, token, app_name
+            )
+            entries = permission_service.list_domain_entries(
+                host, token, registry_cfg, folder
+            )
+        except OntoBricksError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("ReviewService.review_team failed")
+            raise InfrastructureError(
+                "Failed to load domain access list", detail=str(exc)
+            ) from exc
+
+        # Role lookup keyed by the stored principal string (mirrors the
+        # Teams matrix cell mapping).
+        roles = {
+            e.get("principal", ""): e.get("role", "")
+            for e in entries
+            if e.get("principal")
+        }
+
+        members: List[Dict[str, Any]] = []
+        for u in app_principals.get("users", []):
+            email = u.get("email") or ""
+            role = roles.get(email, "")
+            if email and role in ASSIGNABLE_ROLES:
+                members.append(
+                    {
+                        "principal": email,
+                        "principal_type": "user",
+                        "display_name": u.get("display_name") or email,
+                        "role": role,
+                    }
+                )
+        for g in app_principals.get("groups", []):
+            name = g.get("display_name") or g.get("id") or ""
+            role = roles.get(name, "")
+            if name and role in ASSIGNABLE_ROLES:
+                members.append(
+                    {
+                        "principal": name,
+                        "principal_type": "group",
+                        "display_name": name,
+                        "role": role,
+                    }
+                )
+
+        members.sort(
+            key=lambda m: (-role_level(m["role"]), m["display_name"].lower())
+        )
+        return {"success": True, "domain": folder, "members": members}
 
     @staticmethod
     def submit(
