@@ -77,7 +77,7 @@ body {
    ========================================================================== */
 .navbar {
     background-color: var(--db-navbar-bg);
-    border-bottom: none;
+    border-bottom: 1px solid var(--db-navbar-border);
     padding: 0.2rem 1rem;
     min-height: 0;
     position: relative;

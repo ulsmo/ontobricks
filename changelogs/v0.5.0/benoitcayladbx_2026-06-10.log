@@ -478,6 +478,23 @@ loader had used a `bi-hourglass` glyph before being switched to the brand spinne
 
 **Test result**: Rules/docs-only change — no code touched, no tests required.
 
+## UI: dark-grey bottom border on the navbar
+
+**Context**: Requested a bottom line under the navbar in dark grey (the bottom border had
+previously been removed when the navbar was slimmed).
+
+**Changes**:
+1. `src/front/static/global/css/main.css` — `.navbar` `border-bottom: none` →
+   `1px solid var(--db-navbar-border)` (#D8D8D8, soft grey divider). Iterated from the
+   initial `--db-gray` #2C2D2E (too dark) → `--db-gray-600` #6c757d (still too dark) →
+   the navbar-border token.
+
+**Modified files**:
+- `src/front/static/global/css/main.css`
+
+**Test result**: CSS-only change; no lint errors. Hard refresh / dev-server restart needed
+to bust the cached `?v=` asset.
+
 ## UI: match Databricks (apps-v2) navbar text size
 
 **Context**: Requested the navbar to reuse the same font/size as the Databricks apps-v2
