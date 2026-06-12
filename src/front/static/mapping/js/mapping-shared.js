@@ -22,6 +22,61 @@ document.addEventListener('click', () => {
     document.querySelectorAll('.mapping-dropdown.show').forEach(d => d.classList.remove('show'));
 });
 
+/**
+ * Open the mappings discussion. Anchors to the whole mapping layer
+ * (mapping/'mapping'); each comment can optionally be tagged with one or
+ * more ontology classes/relationships via the compose-box tag picker.
+ */
+function openMappingDiscussion() {
+    if (!window.OntoComments) return;
+    const ont = (typeof MappingState !== 'undefined' && MappingState.loadedOntology)
+        ? MappingState.loadedOntology : {};
+    const taggable = [];
+    (ont.classes || []).forEach(function (c) {
+        taggable.push({
+            type: 'ontology_class',
+            ref: c.uri || c.name,
+            label: (c.emoji || '🔷') + ' ' + (c.name || c.uri),
+        });
+    });
+    (ont.properties || []).forEach(function (p) {
+        taggable.push({
+            type: 'ontology_property',
+            ref: p.uri || p.name,
+            label: '🔗 ' + (p.name || p.uri),
+        });
+    });
+    window.OntoComments.openForSelection(
+        'mapping', 'mapping', 'Mappings', taggable
+    );
+}
+
+/**
+ * Inject (or refresh) a contextual "Discuss" button into a mapping modal
+ * header so collaborators can open a thread anchored to this mapping. The
+ * anchor ref is the targeted ontology class / property URI; the thread is
+ * tagged with anchor_type 'mapping'.
+ */
+function injectMappingDiscussButton(modalId, anchorRef, label) {
+    if (!window.OntoComments) return;
+    const modal = document.getElementById(modalId);
+    if (!modal || !anchorRef) return;
+    const header = modal.querySelector('.modal-header');
+    if (!header) return;
+    let btn = header.querySelector('.mapping-discuss-btn');
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-outline-primary btn-sm mapping-discuss-btn ms-auto me-2';
+        btn.title = 'Discuss';
+        btn.innerHTML = '<i class="bi bi-chat-dots"></i>';
+        const closeBtn = header.querySelector('.btn-close, [data-bs-dismiss="modal"]');
+        if (closeBtn) header.insertBefore(btn, closeBtn);
+        else header.appendChild(btn);
+    }
+    btn.onclick = () => window.OntoComments.openForSelection('mapping', anchorRef, label || anchorRef);
+}
+
 // ==========================================================================
 // SQL WIZARD BASE CLASS (Metadata-based)
 // Creates a reusable wizard using domain metadata tables

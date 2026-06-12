@@ -79,10 +79,17 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         onSectionChange: function(section) {
             _initSectionByName(section);
+            // Re-assert the discuss button: some sections (re)render their
+            // header on init, which can drop the injected button. The helper
+            // is idempotent, so repeated passes never duplicate it.
+            injectOntologyDiscussButtons();
+            setTimeout(injectOntologyDiscussButtons, 250);
+            setTimeout(injectOntologyDiscussButtons, 700);
         }
     });
     
     initializeDefaultSection();
+    injectOntologyDiscussButtons();
 
     if (initialSection) {
         const link = document.querySelector(`[data-section="${initialSection}"]`);
@@ -107,6 +114,47 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => waitForReady(0), 400);
     }
 });
+
+/**
+ * Add a "Discuss" button to every ontology section header (except Import)
+ * so the ontology discussion can be opened from anywhere. The Model/Designer
+ * section already carries its own toolbar button, so it is skipped.
+ */
+function injectOntologyDiscussButtons() {
+    const headers = document.querySelectorAll('.sidebar-content .section-header');
+    headers.forEach(function (header) {
+        if (header.closest('#import-section')) return;
+        if (header.querySelector('.onto-discuss-btn') ||
+            header.querySelector('#mapDiscuss')) return;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-sm btn-outline-primary onto-discuss-btn';
+        btn.title = 'Open the ontology discussion';
+        btn.innerHTML = '<i class="bi bi-chat-dots"></i>';
+        btn.addEventListener('click', function () {
+            if (typeof openOntologyDiscussion === 'function') openOntologyDiscussion();
+        });
+
+        // Consistent placement across every section: push the title left
+        // with me-auto and slot the discuss button right after it, ahead of
+        // any existing actions group. Appending *inside* a crowded actions
+        // group (e.g. Business Views) can overflow and hide the button.
+        const first = header.firstElementChild;
+        if (!first) {
+            header.appendChild(btn);
+        } else {
+            first.classList.add('me-auto');
+            const next = first.nextElementSibling;
+            if (next) {
+                btn.classList.add('me-2');
+                header.insertBefore(btn, next);
+            } else {
+                header.appendChild(btn);
+            }
+        }
+    });
+}
 
 /**
  * Initialize the default active section after ensuring data is loaded.

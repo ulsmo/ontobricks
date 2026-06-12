@@ -209,3 +209,59 @@ CREATE TABLE IF NOT EXISTS domain_review_events (
 
 CREATE INDEX IF NOT EXISTS idx_review_events_domain_version
     ON domain_review_events(domain_id, version, created_at);
+
+-- ----------------------------------------------------------------
+-- Collaborative comments — contextual threaded discussion anchored
+-- to a DRAFT domain. The anchor (ontology class/property URI, mapping
+-- URI, graph node/edge reference, or the whole domain) lets the same
+-- thread component open from any surface. A non-empty ``parent_id``
+-- makes the row a reply within a thread. Append-only; ``resolved``
+-- closes a thread without losing history. Grain: (domain_id, version).
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS domain_comments (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_id   uuid NOT NULL
+                REFERENCES domains(id) ON DELETE CASCADE,
+    version     text NOT NULL,
+    anchor_type text NOT NULL DEFAULT 'domain'
+                CHECK (anchor_type IN ('ontology_class', 'ontology_property',
+                                       'mapping', 'graph_node', 'graph_edge',
+                                       'domain')),
+    anchor_ref  text NOT NULL DEFAULT '',
+    parent_id   uuid REFERENCES domain_comments(id) ON DELETE CASCADE,
+    author      text NOT NULL,
+    body        text NOT NULL DEFAULT '',
+    resolved    boolean NOT NULL DEFAULT false,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_domain_comments_anchor
+    ON domain_comments(domain_id, version, anchor_type, anchor_ref);
+
+-- ----------------------------------------------------------------
+-- Collaborative tasks — a personalised work item assigned to a
+-- teammate, usually born from a comment (``comment_id``). Surfaced in
+-- the assignee's "My Tasks" worklist. ``status`` walks
+-- open -> in_progress -> done (or cancelled). Grain: (domain_id, version).
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS domain_tasks (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain_id   uuid NOT NULL
+                REFERENCES domains(id) ON DELETE CASCADE,
+    version     text NOT NULL,
+    assignee    text NOT NULL,
+    created_by  text NOT NULL,
+    title       text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    status      text NOT NULL DEFAULT 'open'
+                CHECK (status IN ('open', 'in_progress', 'done', 'cancelled')),
+    due_date    date,
+    comment_id  uuid REFERENCES domain_comments(id) ON DELETE SET NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_domain_tasks_assignee
+    ON domain_tasks(lower(assignee), status);
+CREATE INDEX IF NOT EXISTS idx_domain_tasks_domain
+    ON domain_tasks(domain_id, version);

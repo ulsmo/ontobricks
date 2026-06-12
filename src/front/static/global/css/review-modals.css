@@ -82,3 +82,127 @@
     font-size: 0.72rem;
     color: var(--db-text-muted, #666);
 }
+
+/* ── Anchored comments offcanvas (OntoComments) ─────────────── */
+/* The app navbar is z-index:1050 (main.css); Bootstrap's offcanvas is
+   only 1045, so without this lift the navbar would paint over the
+   panel's header. Keep the backdrop just below the panel. */
+.oc-comments {
+    z-index: 1060;
+}
+
+.offcanvas-backdrop.oc-comments-backdrop {
+    z-index: 1055;
+}
+
+.oc-comments-list {
+    overflow-y: auto;
+}
+
+.oc-thread {
+    padding: 0.6rem 0.6rem 0.4rem;
+    border: 1px solid var(--db-border, #e3e6ea);
+    border-radius: 0.5rem;
+    margin-bottom: 0.75rem;
+    background: var(--db-surface, #fff);
+}
+
+.oc-thread.oc-resolved {
+    opacity: 0.7;
+    background: var(--db-surface-muted, #f7f9fb);
+}
+
+.oc-bubble {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+}
+
+.oc-bubble-reply {
+    margin-left: 1.6rem;
+}
+
+.oc-avatar {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--db-accent-subtle, #e7f0fe);
+    color: var(--db-accent, #1b6ec2);
+    font-size: 0.7rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.oc-bubble-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.oc-bubble-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.oc-author {
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.oc-time {
+    font-size: 0.7rem;
+    color: var(--db-text-muted, #888);
+}
+
+.oc-text {
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Entity / relationship tags on a comment + in the compose picker */
+.oc-tag-chip {
+    font-weight: 500;
+    font-size: 0.72rem;
+    background: var(--db-surface-alt, #eef2ff);
+    color: var(--db-text, #334155);
+    border-color: #c7d2fe !important;
+}
+
+.oc-bubble-tags .oc-tag-chip {
+    margin-top: 0.15rem;
+}
+
+.oc-tagbar .oc-tag-chips:empty {
+    display: none;
+}
+
+.oc-tag-chip .btn-close {
+    font-size: 0.5rem;
+    padding: 0;
+    margin-left: 0.25rem;
+}
+
+.oc-replies:empty {
+    display: none;
+}
+
+.oc-thread-tools {
+    margin-top: 0.25rem;
+    margin-left: 1.6rem;
+    font-size: 0.78rem;
+}
+
+.oc-reply-box,
+.oc-task-box {
+    margin-top: 0.5rem;
+    margin-left: 1.6rem;
+}
+
+.oc-task-form {
+    background: var(--db-surface-muted, #f7f9fb);
+}

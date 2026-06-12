@@ -1,0 +1,352 @@
+# v0.6.0 — 2026-06-12 — benoitcayladbx
+
+## Collaborative Comments & Tasks
+
+### Context
+Implements the `releasereq/collaborative_comments_tasks_plan.md` roadmap
+item: contextual threaded commenting anchored to a DRAFT/IN-REVIEW domain
+(ontology classes/properties, mappings, graph nodes/edges, or the whole
+domain) plus the ability to turn a comment into a personalised task
+assigned to a teammate, surfaced in the cross-domain "My Tasks" worklist.
+Follows the existing `domain_review_events` playbook (idempotent DDL,
+lazy self-heal, SP grants, `(domain_id, version)` grain).
+
+### Changes
+1. `src/back/objects/registry/store/base.py` — new `DomainComment` /
+   `DomainTask` TypedDicts and seven abstract `RegistryStore` methods
+   (`insert_comment`, `list_comments`, `resolve_comment`, `insert_task`,
+   `list_tasks`, `list_tasks_for_assignee`, `update_task_status`).
+2. `src/back/objects/registry/store/lakebase/schema.sql` — canonical DDL
+   for `domain_comments` + `domain_tasks` (anchor/parent/resolved columns,
+   task status CHECK, FK to comments, indexes on
+   `(domain_id, version, anchor_type, anchor_ref)` and
+   `(lower(assignee), status)`).
+3. `src/back/objects/registry/store/lakebase/store.py` — Lakebase impl of
+   the seven methods, a lazy `_ensure_collab_tables()` self-heal (same
+   pattern as `_ensure_review_events_table`), `_collab_tables_ready` guard,
+   row→dict mappers, and the two new tables added to `_KNOWN_TABLES`.
+4. `scripts/bootstrap-lakebase-perms.sh` — Step 2b idempotent migration
+   for the two new tables (run as schema owner) so existing deployments
+   self-heal under `make bootstrap-lakebase`.
+5. `src/back/objects/registry/RegistryService.py` — thin passthroughs to
+   the new store methods.
+6. `src/back/objects/registry/CommentService.py` — NEW stateless service:
+   anchor validation, DRAFT/IN-REVIEW write gate (PUBLISHED is read-only),
+   per-action role rules (member reads/comments; author/editor/admin
+   resolves; assignee/creator/editor/admin updates tasks), and a
+   best-effort `commented` audit row on task create/complete to keep the
+   Validation timeline unified.
+7. `src/api/routers/internal/comments.py` — NEW `/comments` router
+   (list/add/resolve comments, list/create/advance tasks); registered in
+   `src/api/routers/internal/__init__.py`.
+8. `src/back/objects/registry/ReviewService.py` — `my_tasks` now also
+   returns `assigned_tasks` (open/in-progress tasks for the caller) via a
+   best-effort `_assigned_tasks` helper; backward compatible.
+9. `src/front/static/global/js/comments-panel.js` — NEW reusable
+   right-side offcanvas (`window.OntoComments.openThread`) rendering the
+   anchored thread: replies, resolve/reopen, and create-task-from-comment
+   with an assignee picker sourced from the domain access roster.
+10. `src/front/templates/base.html` + `.../css/review-modals.css` — load
+    and style the new panel globally.
+11. `src/front/static/registry/js/registry-my-tasks.js` +
+    `.../home/js/home-tasks.js` — render an "Assigned to me" section with
+    inline status actions (Start / Done) alongside the review worklist.
+12. `src/front/static/domain/js/domain-review.js` — "Discussion" button on
+    the Validation banner opens the domain-level thread.
+13. `docs/architecture.md` — documented the three audit/collab tables in
+    the Lakebase registry schema table.
+
+### Modified / added files
+- src/back/objects/registry/store/base.py
+- src/back/objects/registry/store/lakebase/schema.sql
+- src/back/objects/registry/store/lakebase/store.py
+- scripts/bootstrap-lakebase-perms.sh
+- src/back/objects/registry/RegistryService.py
+- src/back/objects/registry/CommentService.py (new)
+- src/api/routers/internal/comments.py (new)
+- src/api/routers/internal/__init__.py
+- src/back/objects/registry/ReviewService.py
+- src/front/static/global/js/comments-panel.js (new)
+- src/front/templates/base.html
+- src/front/static/global/css/review-modals.css
+- src/front/static/registry/js/registry-my-tasks.js
+- src/front/static/home/js/home-tasks.js
+- src/front/static/domain/js/domain-review.js
+- docs/architecture.md
+- tests/units/registry/test_registry_store.py (extended)
+- tests/units/registry/test_comment_service.py (new)
+- tests/units/api/test_comment_endpoints.py (new)
+
+### Decisions
+- Comments/tasks are writable on DRAFT **and** IN-REVIEW (active
+  collaboration phases); PUBLISHED is read-only (reopen to continue).
+- Fine-grained per-surface anchoring (ontology/mapping/graph selection)
+  is reachable through the documented `OntoComments.openThread(...)` seam;
+  the Validation page wires the domain-level anchor as the first adopter.
+
+### Tests
+- `tests/units` (full unit tree): 2392 passed.
+- New: `test_comment_service.py` (22), `test_comment_endpoints.py` (9).
+- Extended `test_registry_store.py`: in-memory contract for comments/tasks
+  **plus** a `TestLakebaseCollab` class driving the real Lakebase SQL code
+  paths (row mappers, lazy `_ensure_collab_tables` short-circuit,
+  rowcount-based not-found handling) via the scripted cursor.
+- Extended `test_review_service.py`: `my_tasks` now asserts the merged
+  `assigned_tasks` (open/in-progress filter, backend-error resilience,
+  empty-email skip).
+- Full repo run shows 53 failures isolated to `tests/mcp/integration`
+  and the async API tests it pollutes when the entire ~2800-test suite
+  runs in one process — pre-existing event-loop ordering issue; every one
+  of those tests passes in isolation and per-directory. No regressions
+  from this change.
+
+## Per-surface discussion anchoring (ontology / mapping / graph)
+
+### Context
+Follow-up to the Collaborative Comments & Tasks landing: wire the
+fine-grained selection hooks so users can open a thread anchored to an
+individual entity instead of only the whole domain. Completes the
+`OntoComments.openThread(...)` seam noted as future work above.
+
+### Changes
+1. `src/front/static/global/js/comments-panel.js` — added
+   `OntoComments.openForSelection(anchorType, anchorRef, anchorLabel)`:
+   resolves the loaded domain folder + version once (cached) via
+   `/domain/version-status`, gates on a registry-backed domain, then opens
+   the anchored thread. Editor surfaces no longer need to carry
+   folder/version themselves.
+2. `src/front/static/query/js/query-sigmagraph.js` — "Discuss this entity"
+   / "Discuss this relationship" buttons appended to the node and edge
+   detail panels; new `SigmaGraph.discussNode` / `SigmaGraph.discussEdge`
+   public methods anchor to `graph_node` (subject URI) and `graph_edge`
+   (`source|predicate|target`).
+3. `src/front/static/ontology/js/ontology-shared-panels.js` — reusable
+   `injectPanelDiscussButton(...)` adds a header Discuss button on the
+   entity/relationship edit + view panels, anchoring to `ontology_class`
+   / `ontology_property` by URI.
+4. `src/front/static/mapping/js/mapping-shared.js` — reusable
+   `injectMappingDiscussButton(...)` adds a Discuss button to a mapping
+   modal header (anchor_type `mapping`, anchor ref = targeted class /
+   property URI); wired from `mapping-entity-modal.js` and
+   `mapping-relationship-modal.js`.
+
+### Modified files
+- src/front/static/global/js/comments-panel.js
+- src/front/static/query/js/query-sigmagraph.js
+- src/front/static/ontology/js/ontology-shared-panels.js
+- src/front/static/mapping/js/mapping-shared.js
+- src/front/static/mapping/js/mapping-entity-modal.js
+- src/front/static/mapping/js/mapping-relationship-modal.js
+
+### Decisions
+- Anchoring auto-resolves domain context from the existing
+  `/domain/version-status` endpoint rather than threading it through every
+  surface — one cached fetch, consistent gating, matches `domain-review.js`.
+- Anchor refs use the canonical URI (or `source|predicate|target` for
+  edges), matching the `anchor_type` set already enforced by
+  `CommentService` and the `domain_comments` CHECK constraint — no backend
+  change required.
+
+### Tests
+- Frontend-only wiring; no Python surface changed. Backend anchor handling
+  already covered by `test_comment_service.py` / `test_comment_endpoints.py`
+  (all anchor types). Unit suite re-run: no regressions.
+
+### Fixup
+- `ontology-shared-panels.js` — designer panel Discuss button now uses
+  `ms-auto me-1` so it groups top-right next to the close button instead of
+  landing mid-header (the header is `justify-content: space-between`).
+
+## Ontology designer diagram-level discussion + tag picker
+
+### Context
+The Ontology Designer toolbar needed a discussion entry point for the
+*whole* diagram (not a specific entity), with an optional way to re-tag the
+thread to a specific class/relationship — requested next to the icon
+generator button.
+
+### Changes
+1. `src/front/templates/partials/ontology/_ontology_map.html` — added a
+   "Discussion" button (`#mapDiscuss`) to the designer toolbar, next to the
+   icon generator (`#mapAutoAssignIcons`).
+2. `src/front/static/ontology/js/ontology-map.js` — `openOntologyDiscussion()`
+   opens the whole-diagram thread (anchor `domain` / ref `ontology`, kept
+   distinct from the Validation domain thread which uses ref `''`) and
+   passes a `taggable` list built from `OntologyState.config`
+   classes/properties.
+3. `src/front/static/global/js/comments-panel.js` — the thread panel now
+   accepts an optional `taggable` list and renders a header `<select>`
+   picker. Entry 0 is the base scope; choosing a class/relationship re-tags
+   the open discussion (re-anchors + reloads) without closing the panel.
+   `openForSelection(...)` gained a 4th `taggable` arg.
+
+### Modified files
+- src/front/templates/partials/ontology/_ontology_map.html
+- src/front/static/ontology/js/ontology-map.js
+- src/front/static/global/js/comments-panel.js
+
+### Decisions
+- Whole-ontology discussion uses `domain` + ref `ontology` so it is a
+  distinct thread from the Validation page's domain thread, no new
+  `anchor_type` (no backend / CHECK-constraint change).
+- The tag picker reuses the generic anchor model: each option is just an
+  `{anchorType, anchorRef, anchorLabel}` the panel switches to — so the
+  same mechanism is available to any future surface.
+
+### Tests
+- Frontend-only; backend anchor handling unchanged and already covered.
+
+## Comment tags replace per-entity Discuss buttons (designer)
+
+### Context
+Reworked the designer collaboration UX: instead of a Discuss button on every
+right-pane entity/relationship panel (and a header scope switcher), the
+single diagram-level discussion now lets each *comment* carry one or more
+entity/relationship tags, picked from the compose box.
+
+### Changes
+1. `src/front/static/ontology/js/ontology-shared-panels.js` — removed
+   `injectPanelDiscussButton(...)` and its four call sites (entity/property
+   edit + view panels). The right pane no longer carries a Discuss button.
+2. `src/front/static/global/js/comments-panel.js` — replaced the header
+   anchor-switch dropdown with a per-comment **tag picker**:
+   - `taggable` is now a vocabulary of `{type, ref, label}` entries.
+   - The main compose box and each reply box get a tag `<select>`
+     (Entities / Relationships optgroups) that adds removable chips.
+   - Tags are embedded in the comment body via a `[[onto-tags]]` JSON
+     marker (`encodeBody`/`parseBody`) — no schema change — and rendered as
+     badges under each comment.
+3. `src/front/static/global/css/review-modals.css` — styles for the tag
+   chips (`.oc-tag-chip`, `.oc-bubble-tags`, `.oc-tagbar`).
+4. `src/front/static/ontology/js/ontology-map.js` — designer Discussion
+   button still anchors to the whole diagram (domain/'ontology') and now
+   passes the class/relationship vocabulary as `taggable`.
+
+### Decisions
+- Tags live inside the comment body behind a marker so the feature is fully
+  frontend and reversible; if first-class tagging is wanted later, promote
+  the marker payload into a `domain_comments.tags` column.
+- Graph and mapping surfaces keep their own Discuss entry points (separate
+  pages, different context); only the ontology designer right-pane buttons
+  were removed per request.
+
+### Tests
+- Frontend-only; no Python surface touched. Unit suite unaffected.
+
+### Fixup
+- `ontology-map.js` — tag picker never appeared because the vocabulary was
+  read via `window.OntologyState`, but `OntologyState` is a `const` (lexical
+  global, not a `window` property), so the guard short-circuited to an empty
+  list. Now read via `typeof OntologyState !== 'undefined' && ...`.
+
+## Discuss button on all ontology sections
+
+### Context
+The discussion entry point should be reachable from every ontology section,
+not just the Model/Designer.
+
+### Changes
+1. `src/front/static/ontology/js/ontology-init.js` — `injectOntologyDiscussButtons()`
+   adds a chat button to every `.section-header` in the ontology page on load,
+   wired to `openOntologyDiscussion()`. Skips the Import section (per request)
+   and the Model/Designer section (which already has a toolbar button).
+   Placement is layout-aware: appended into an existing right-hand actions
+   group when present, otherwise pushed to the far right with `ms-auto`.
+
+### Modified files
+- src/front/static/ontology/js/ontology-init.js
+
+### Tests
+- Frontend-only; no Python surface touched.
+
+## Task assignee picker lists domain permission holders
+
+### Context
+"Create task" showed an empty "Assign to" list. The panel sourced names
+from `/review/{folder}/{version}/team`, which intersects domain permission
+entries with the Databricks App ACL and can come back empty. The picker
+should simply list everyone who has a role on the domain.
+
+### Changes
+1. `src/back/objects/registry/CommentService.py` — new `list_assignees(...)`:
+   reads the domain permission entries (`permission_service.list_domain_entries`)
+   and returns principals with an assignable role (viewer/editor/builder),
+   most-privileged first. Any member may read it; backend errors degrade to
+   an empty list rather than failing the panel.
+2. `src/api/routers/internal/comments.py` — new
+   `GET /comments/{folder}/{version}/assignees` (per-domain) delegating to it.
+3. `src/front/static/global/js/comments-panel.js` — `loadMembers()` now calls
+   the new assignees endpoint instead of the review team endpoint.
+
+### Modified / added files
+- src/back/objects/registry/CommentService.py
+- src/api/routers/internal/comments.py
+- src/front/static/global/js/comments-panel.js
+- tests/units/registry/test_comment_service.py (assignees cases)
+- tests/units/api/test_comment_endpoints.py (assignees endpoint)
+
+### Decisions
+- Used the domain permission entries (not the App-ACL-intersected Team view)
+  as the assignee source — that is literally "people with permissions on the
+  domain". The Validation Team display is left unchanged.
+
+### Tests
+- `test_comment_service.py` + `test_comment_endpoints.py`: 35 passed
+  (incl. assignees sorting, member gate, backend-error resilience, endpoint
+  delegation).
+
+### Fixup
+- `ontology-init.js` — the injected discuss button used `ms-auto`, which
+  pushed an existing trailing action (e.g. the Wizard's "Generate Ontology"
+  button) to the left. Now the title gets `me-auto` and the discuss button
+  slots just after it, so existing action buttons stay top-right.
+- `ontology-init.js` — re-assert the discuss button on every section change
+  (idempotent, with short delayed passes). Some sections re-render their
+  header on `init()` after the one-time load pass, which dropped the button
+  on Groups, Business Views, Entities, Relationships, Data Quality, Cohorts
+  and Pitfalls. The button is now reliably present on all sections.
+- `ontology-init.js` — unified the discuss-button placement: always insert
+  it right after the title (title gets `me-auto`), ahead of any existing
+  actions group, instead of appending inside that group. The Business Views
+  header's action bar is very crowded and was pushing the appended button
+  into overflow; it's now always visible.
+- `_ontology_design.html` — added the discuss button statically to the
+  Business Views header (class `onto-discuss-btn`, so the JS injector skips
+  it). The OntoViz designer section was the one place runtime injection
+  wasn't surfacing the button reliably; the static button guarantees it.
+- `_ontology_entities.html`, `_ontology_relationships.html` — added the
+  discuss button statically to the Classes and Relationships headers too
+  (same `onto-discuss-btn` opt-out from the JS injector).
+- `_ontology_dataquality.html`, `_ontology_business_rules.html`,
+  `_ontology_cohorts.html`, `_pitfalls.html` — added the discuss button
+  statically to the Data Quality, Business Rules, Cohorts and Pitfalls
+  headers (same `onto-discuss-btn` opt-out).
+
+## Discuss capability on the Mapping pages
+
+### Context
+Extend the contextual discussion (with the entity/relationship tag picker)
+to the Mapping workspace, matching the ontology sections.
+
+### Changes
+1. `src/front/static/mapping/js/mapping-shared.js` — `openMappingDiscussion()`
+   opens the thread anchored to the whole mapping layer (anchor_type
+   `mapping`, ref `mapping`) and passes the loaded ontology's
+   classes/relationships as the comment tag vocabulary.
+2. Added the discuss button statically to every Mapping section header
+   except Import: `_mapping_information.html`, `_mapping_design.html`,
+   `_mapping_manual.html`, `_mapping_autoassign.html`,
+   `_mapping_diagnostics.html`, `_mapping_r2rml.html`,
+   `_mapping_sparksql.html` (each `onclick="openMappingDiscussion()"`).
+
+### Decisions
+- Whole-mapping discussion uses anchor `mapping`/`mapping` (distinct from
+  the ontology designer's `domain`/`ontology` thread); per-mapping modal
+  Discuss buttons remain for entity/relationship-specific threads.
+- `comments-panel.js` is already loaded globally via `base.html`, so the
+  mapping page reuses the same thread panel + tag picker with no extra
+  wiring.
+
+### Tests
+- Frontend-only; no Python surface changed. Backend `mapping` anchor type
+  already validated/covered.
