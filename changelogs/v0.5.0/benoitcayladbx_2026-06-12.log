@@ -1,0 +1,52 @@
+# v0.5.0 — 2026-06-12 — benoitcayladbx
+
+## Fix: Deleted class attributes reappear in OWL export (issue #50)
+
+**Context**: Reported in
+[databrickslabs/ontobricks#50](https://github.com/databrickslabs/ontobricks/issues/50).
+When an `owl:DatatypeProperty` (a class attribute) was deleted in the ontology
+designer, the deleted property reappeared as a `DatatypeProperty` in every
+subsequent OWL/Turtle export.
+
+**Root cause**: Domain-scoped datatype properties are stored in two places once
+an OWL file is parsed — `classes[].dataProperties` (the authoritative attribute
+list the designer mutates) and a shadow entry in the top-level `properties[]`
+list (`OntologyParser.get_properties()` legitimately returns every property,
+including datatype ones, and `apply_parsed_owl_to_domain` persists both). When
+an attribute is deleted in the designer only `classes[].dataProperties` is
+updated; the shadow in `properties[]` survives. `OntologyGenerator.generate()`
+emits class attributes from *both* paths — `_add_class()` →
+`_add_data_property_for_class()` *and* `_add_property()` for the `properties[]`
+list — so `_add_property()` re-emitted the stale shadow and the deleted
+attribute came back on export.
+
+Changing `get_properties()` to drop datatype properties was rejected: its
+contract (and downstream consumers / tests) rely on it returning all
+properties. The fix is therefore applied at the single export choke point, the
+generator, which treats `classes[].dataProperties` as the source of truth for
+class attributes.
+
+**Changes**:
+1. `src/back/core/w3c/owl/OntologyGenerator.py` — added `_local_name()`,
+   `_build_class_attr_index()` (built once in `__init__`, maps each class — by
+   name and by URI local name — to the set of attribute local names it
+   declares) and `_is_stale_datatype_shadow()`. In `_add_property()`, a
+   `DatatypeProperty` whose domain class is known but no longer declares that
+   attribute is now skipped (logged at debug). The check is conservative: an
+   empty domain or an unknown domain class is never dropped, so object
+   properties, domain-less datatype properties and surviving attributes
+   (including their declared range, e.g. `xsd:integer`) are unaffected.
+2. `tests/units/ontology/test_owl_generator.py` — added
+   `TestDeletedAttributeNotReexported` with four regression tests: stale shadow
+   skipped, surviving shadow (and its range) kept, unknown-domain datatype
+   property kept, and a full parse → delete-attribute → regenerate round-trip.
+
+**Modified files**:
+- `src/back/core/w3c/owl/OntologyGenerator.py`
+- `tests/units/ontology/test_owl_generator.py`
+
+**Test result**: `python -m pytest tests/units --ignore=tests/property` →
+**2277 passed, 15 skipped**. The two new reproduction tests fail before the fix
+and pass after it; the two conservative-behaviour tests pass throughout.
+(`tests/property/test_owl_roundtrip.py` is skipped — the `hypothesis` package is
+not installed in this environment, unrelated to this change.)
