@@ -564,3 +564,93 @@ Make it one click to assign a new task to oneself from the discussion pane.
 
 ### Tests
 - Frontend-only; `node --check` passes; no linter errors.
+
+## Test suite — coverage for collab features + `make test` isolation fix
+
+### Context
+Run the full suite and backfill tests for the new comments/tasks/
+collaboration work. Running the whole tree in one process surfaced a
+pre-existing test-isolation bug: the Playwright **e2e** suite (sync API)
+keeps a session-scoped event loop alive, so every `pytest-asyncio` test
+that runs after it (MCP schema tests, comment/review/version-status
+endpoint tests) failed with `RuntimeError: Cannot run the event loop
+while another loop is running`. This only bites locally — CI runs the PR
+gate with `--ignore=tests/e2e` and runs e2e as a separate nightly job;
+bare `make test` (`pytest`) ran everything together and so went red.
+
+### Changes
+1. `Makefile` — `make test` / `make test-cov` now mirror the CI G1 gate
+   (`--ignore=tests/e2e -m "not e2e and not property and not eval and not
+   external"`) so the Playwright suite no longer poisons the shared
+   asyncio loop. Added a dedicated `make test-e2e` target (runs the
+   Playwright suite by path, in its own process) plus help text.
+2. `tests/units/api/test_domain_current_user_endpoint.py` — new unit tests
+   for `GET /domain/current-user` (the endpoint behind the discussion
+   pane's "Assign to me"): app-mode proxy headers (username preferred,
+   email fallback) and local/PAT mode (workspace client lookup, and the
+   no-client empty fallback). 5 tests.
+3. `tests/units/api/test_ui_rendering.py` — extended `TestDomainPage` for
+   the new Domain → Collaboration area: sidebar links + section divs for
+   `mytasks` / `discussions`, and a `test_collaboration_section_assets_loaded`
+   asserting `domain-collaboration.js` and the timeline/my-tasks containers
+   render.
+
+### Modified files
+- `Makefile`
+- `tests/units/api/test_domain_current_user_endpoint.py` (new)
+- `tests/units/api/test_ui_rendering.py`
+
+### Decisions
+- The comments/tasks service (`tests/units/registry/test_comment_service.py`,
+  25 tests) and router (`tests/units/api/test_comment_endpoints.py`, 10
+  tests incl. `/assignees`) were already well covered, so new tests target
+  only the genuinely uncovered surfaces (current-user endpoint, the new
+  Domain collaboration UI). The timeline/"Assign to me" JS itself has no
+  Python-side harness (no JS test runner in this repo).
+- `make test-e2e` selects e2e by path rather than `-m e2e` because the e2e
+  tests are not tagged with the `e2e` marker (selecting by marker collects
+  zero); this matches the usage documented in `tests/e2e/conftest.py`.
+
+### Tests
+- PR gate (`make test`): **2627 passed, 17 skipped, 12 deselected** in
+  ~24s (previously 54 failures / 4m17s when e2e ran in-process).
+- New/changed test files lint clean (`flake8 --max-line-length=100`).
+
+## Discussions timeline — multi-select tag filter
+
+### Context
+The Domain → Collaboration → Discussions timeline already renders the
+per-comment tags (entity/relationship chips). Let users narrow the
+timeline to one or more of those tags.
+
+### Changes
+1. `src/front/templates/partials/domain/_domain_discussions.html` — added a
+   "Tags" dropdown (Bootstrap, `data-bs-auto-close="outside"` so multiple
+   boxes can be ticked) with a live count badge, beside the existing
+   "Show resolved" switch. Hidden until the loaded comments actually carry
+   tags.
+2. `src/front/static/domain/js/domain-collaboration.js`
+   - `selectedTags` set tracks the active filter keys.
+   - `buildTagFilter()` computes the distinct tag vocabulary from the loaded
+     comments (via the shared `OntoComments.parseBody`), renders the
+     checkbox menu, wires per-tag toggles and a "Clear" action, and
+     self-prunes selections whose tag no longer appears. Called after
+     comments load / on refresh.
+   - `renderDiscussions()` now filters by tag (OR semantics: keep comments
+     carrying any selected tag) and shows a dedicated "No discussions match
+     the selected tags" empty state when a filter hides everything.
+   - `parsedTags()` / `tagKey()` helpers; `updateTagCount()` drives the
+     badge.
+
+### Decisions
+- OR semantics across selected tags (match any) — the common expectation
+  for a faceted filter; AND would make multi-select almost always empty.
+- Tags keyed by their `ref` (falling back to `label`) so the same entity
+  tagged on different comments collapses to one filter row.
+- Reuses the panel's `OntoComments.parseBody` rather than re-implementing
+  tag extraction — no duplication.
+
+### Tests
+- `node --check` passes; `TestDomainPage` UI-render tests still green
+  (19 passed). Frontend-only; the asset version is fixed at server
+  startup, so restart the dev server to pick up the new JS.

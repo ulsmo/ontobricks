@@ -20,6 +20,7 @@
     let discussionsLoaded = false;
     let domainCtx = null;          // { folder, version, hasRegistry }
     let allComments = [];          // cached raw comments for re-render
+    const selectedTags = new Set(); // active tag-filter keys (multi-select)
 
     document.addEventListener('DOMContentLoaded', init);
 
@@ -112,6 +113,17 @@
         const s = String(ref);
         const part = s.split('#').pop().split('/').pop();
         return part || s;
+    }
+
+    function parsedTags(cm) {
+        const parsed = (window.OntoComments && OntoComments.parseBody)
+            ? OntoComments.parseBody(cm.body)
+            : { tags: [] };
+        return parsed.tags || [];
+    }
+
+    function tagKey(t) {
+        return String(t.ref || t.label || '');
     }
 
     // ========================================================================
@@ -312,6 +324,7 @@
             }
             allComments = data.comments || [];
             discussionsLoaded = true;
+            buildTagFilter();
             renderDiscussions();
         } catch (err) {
             c.innerHTML = errBox('Network error: ' + String(err));
@@ -325,15 +338,24 @@
 
         let items = allComments.slice();
         if (!showResolved) items = items.filter((x) => !x.resolved);
+        // Tag filter (multi-select, OR semantics: keep comments carrying any
+        // of the selected tags).
+        if (selectedTags.size) {
+            items = items.filter((x) =>
+                parsedTags(x).some((t) => selectedTags.has(tagKey(t))));
+        }
         // Newest first.
         items.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
         if (!items.length) {
-            c.innerHTML =
-                '<div class="text-center text-muted py-5">' +
-                '<i class="bi bi-chat-square-dots d-block mb-2" style="font-size:1.8rem;"></i>' +
-                'No discussions yet. Open any ontology, mapping or twin page and ' +
-                'click <i class="bi bi-chat-dots"></i> to start one.</div>';
+            c.innerHTML = selectedTags.size
+                ? '<div class="text-center text-muted py-5">' +
+                  '<i class="bi bi-funnel d-block mb-2" style="font-size:1.8rem;"></i>' +
+                  'No discussions match the selected tags.</div>'
+                : '<div class="text-center text-muted py-5">' +
+                  '<i class="bi bi-chat-square-dots d-block mb-2" style="font-size:1.8rem;"></i>' +
+                  'No discussions yet. Open any ontology, mapping or twin page and ' +
+                  'click <i class="bi bi-chat-dots"></i> to start one.</div>';
             return;
         }
 
@@ -355,6 +377,85 @@
                 openThreadFor(row.dataset.anchorType, row.dataset.anchorRef, row.dataset.anchorLabel);
             });
         });
+    }
+
+    function buildTagFilter() {
+        const wrap = document.getElementById('domainDiscTagFilterWrap');
+        const menu = document.getElementById('domainDiscTagMenu');
+        if (!wrap || !menu) return;
+
+        // Distinct tags across every comment, keyed by ref, with a label.
+        const byKey = new Map();
+        allComments.forEach((cm) => {
+            parsedTags(cm).forEach((t) => {
+                const k = tagKey(t);
+                if (k && !byKey.has(k)) byKey.set(k, t.label || t.ref || k);
+            });
+        });
+
+        // Forget selections whose tag no longer appears in the data.
+        Array.from(selectedTags).forEach((k) => {
+            if (!byKey.has(k)) selectedTags.delete(k);
+        });
+
+        if (!byKey.size) {
+            wrap.style.display = 'none';
+            menu.innerHTML = '';
+            updateTagCount();
+            return;
+        }
+        wrap.style.display = '';
+
+        const entries = Array.from(byKey.entries())
+            .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+        let html =
+            '<li class="d-flex justify-content-between align-items-center ' +
+            'px-1 pb-1 mb-1 border-bottom">' +
+            '<span class="small fw-medium text-muted">Filter by tag</span>' +
+            '<button type="button" class="btn btn-link btn-sm p-0 ' +
+            'text-decoration-none" id="domainDiscTagClear">Clear</button></li>';
+        entries.forEach((e) => {
+            const k = e[0];
+            const checked = selectedTags.has(k) ? ' checked' : '';
+            html +=
+                '<li><label class="dropdown-item d-flex align-items-center ' +
+                'gap-2 small">' +
+                '<input class="form-check-input mt-0" type="checkbox" value="' +
+                escAttr(k) + '"' + checked + '>' +
+                '<span>' + esc(e[1]) + '</span></label></li>';
+        });
+        menu.innerHTML = html;
+
+        menu.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+            cb.addEventListener('change', () => {
+                if (cb.checked) selectedTags.add(cb.value);
+                else selectedTags.delete(cb.value);
+                updateTagCount();
+                renderDiscussions();
+            });
+        });
+        const clr = document.getElementById('domainDiscTagClear');
+        if (clr) {
+            clr.addEventListener('click', () => {
+                selectedTags.clear();
+                menu.querySelectorAll('input[type=checkbox]')
+                    .forEach((cb) => { cb.checked = false; });
+                updateTagCount();
+                renderDiscussions();
+            });
+        }
+        updateTagCount();
+    }
+
+    function updateTagCount() {
+        const badge = document.getElementById('domainDiscTagCount');
+        if (!badge) return;
+        if (selectedTags.size) {
+            badge.textContent = String(selectedTags.size);
+            badge.classList.remove('d-none');
+        } else {
+            badge.classList.add('d-none');
+        }
     }
 
     function timelineEntry(cm) {
