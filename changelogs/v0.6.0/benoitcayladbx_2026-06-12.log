@@ -654,3 +654,42 @@ timeline to one or more of those tags.
 - `node --check` passes; `TestDomainPage` UI-render tests still green
   (19 passed). Frontend-only; the asset version is fixed at server
   startup, so restart the dev server to pick up the new JS.
+
+## Discussions — registry upgrade SQL (0.5 -> 0.6)
+
+### Context
+The collaborative comments/tasks tables (`domain_comments`, `domain_tasks`)
+are created lazily by the app (`_ensure_collab_tables`) and by
+`make bootstrap-lakebase` (schema owner), but there was no standalone,
+auditable `psql` migration like `upgrade_lakebase_0.4_To_0.5.sql`. Provide
+one so an existing (pre-Discussions) Lakebase registry can be upgraded
+out-of-band by a DBA.
+
+### Changes
+1. `scripts/upgrade_lakebase_0.5_To_0.6.sql` — new idempotent one-shot
+   migration that adds `domain_comments` + `domain_tasks` (+ the three
+   indexes), mirroring the canonical
+   `src/back/objects/registry/store/lakebase/schema.sql`. Follows the same
+   psql conventions as the 0.4->0.5 script (`-v reg_schema=...`, default
+   `ontobricks_registry`, `\set ON_ERROR_STOP on`, single `BEGIN/COMMIT`).
+   - Also backfills the `anchor_type` and task `status` CHECK constraints on
+     registries whose tables were first created by the app's lazy self-heal
+     path (which omits those constraints), via guarded `pg_constraint`
+     lookups — so the schema ends up fully constrained either way.
+   - Non-destructive: no data touched, no columns dropped.
+
+### Modified files
+- `scripts/upgrade_lakebase_0.5_To_0.6.sql` (new)
+
+### Decisions
+- The explicit script carries the CHECK constraints (anchor_type, status)
+  that the runtime lazy path leaves off, making it the authoritative,
+  fully-constrained migration — and it self-heals already-lazily-created
+  tables by adding the missing constraints.
+- Scoped to the Discussions feature (comments + tasks); the review/build
+  tables belong to the 0.4->0.5 era and already have their own provisioning.
+
+### Tests
+- `psql` available locally; script mirrors the proven 0.4->0.5 structure
+  (2 CREATE TABLE + 3 CREATE INDEX + 2 guarded ADD CONSTRAINT). Idempotent;
+  safe to re-run.
