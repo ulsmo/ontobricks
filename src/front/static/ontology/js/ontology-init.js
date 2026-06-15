@@ -137,22 +137,14 @@ function injectOntologyDiscussButtons() {
         });
 
         // Consistent placement across every section: push the title left
-        // with me-auto and slot the discuss button right after it, ahead of
-        // any existing actions group. Appending *inside* a crowded actions
-        // group (e.g. Business Views) can overflow and hide the button.
+        // with me-auto and append the discuss button as the last (rightmost)
+        // element, after any existing actions group.
         const first = header.firstElementChild;
-        if (!first) {
-            header.appendChild(btn);
-        } else {
+        if (first) {
             first.classList.add('me-auto');
-            const next = first.nextElementSibling;
-            if (next) {
-                btn.classList.add('me-2');
-                header.insertBefore(btn, next);
-            } else {
-                header.appendChild(btn);
-            }
+            btn.classList.add('ms-2');
         }
+        header.appendChild(btn);
     });
 }
 

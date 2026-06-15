@@ -1514,23 +1514,9 @@ let _iconsCurrentTaskId = null;
 function openOntologyDiscussion() {
     if (!window.OntoComments) return;
     const cfg = (typeof OntologyState !== 'undefined' && OntologyState.config) || {};
-    const taggable = [];
-    (cfg.classes || []).forEach((c) => {
-        taggable.push({
-            type: 'ontology_class',
-            ref: c.uri || c.name,
-            label: (c.emoji || '🔷') + ' ' + (c.name || c.uri),
-        });
-    });
-    (cfg.properties || []).forEach((p) => {
-        taggable.push({
-            type: 'ontology_property',
-            ref: p.uri || p.name,
-            label: '🔗 ' + (p.name || p.uri),
-        });
-    });
     OntoComments.openForSelection(
-        'domain', 'ontology', 'Whole ontology diagram', taggable
+        'domain', 'ontology', 'Whole ontology diagram',
+        OntoComments.taggableFromOntology(cfg)
     );
 }
 

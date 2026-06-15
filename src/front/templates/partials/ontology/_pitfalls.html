@@ -7,10 +7,6 @@
         <p class="text-muted mb-0 small">Detect structural, logical, and semantic issues in your ontology (P1.1–P4.7)</p>
     </div>
     <div class="d-flex align-items-center gap-3">
-        <button type="button" class="btn btn-sm btn-outline-primary onto-discuss-btn"
-                title="Open the ontology discussion" onclick="openOntologyDiscussion()">
-            <i class="bi bi-chat-dots"></i>
-        </button>
         <!-- Precision score gauge (hidden until first analysis) -->
         <div id="pitfallsGaugeWrapper" class="d-none text-center" style="min-width:90px" title="Ontology Precision Score">
             <svg id="pitfallsGaugeSvg" width="72" height="72" viewBox="0 0 72 72" aria-label="Precision score gauge">
@@ -26,6 +22,10 @@
         </div>
         <button class="btn btn-sm btn-primary" id="pitfallsRunBtn">
             <i class="bi bi-play-fill me-1"></i>Run Analysis
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-primary onto-discuss-btn"
+                title="Open the ontology discussion" onclick="openOntologyDiscussion()">
+            <i class="bi bi-chat-dots"></i>
         </button>
     </div>
 </div>

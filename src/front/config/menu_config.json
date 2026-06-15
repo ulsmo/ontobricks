@@ -195,6 +195,27 @@
                     ]
                 },
                 {
+                    "id": "domain-collaboration",
+                    "title": "Collaboration",
+                    "icon": "bi-chat-left-text",
+                    "items": [
+                        {
+                            "id": "mytasks",
+                            "label": "My Tasks",
+                            "icon": "bi-inbox",
+                            "default": false,
+                            "requires": "domain_saved"
+                        },
+                        {
+                            "id": "discussions",
+                            "label": "Discussions",
+                            "icon": "bi-chat-left-text",
+                            "default": false,
+                            "requires": "domain_saved"
+                        }
+                    ]
+                },
+                {
                     "id": "domain-management",
                     "title": "Management",
                     "icon": "bi-gear",

@@ -350,3 +350,217 @@ to the Mapping workspace, matching the ontology sections.
 ### Tests
 - Frontend-only; no Python surface changed. Backend `mapping` anchor type
   already validated/covered.
+
+## Discuss capability on the Digital Twin pages
+
+### Context
+Extend the contextual discussion (with the entity/relationship tag picker)
+to the Digital Twin workspace, matching the ontology and mapping sections.
+
+### Changes
+1. `src/front/static/query/js/query.js` — `openTwinDiscussion()` opens the
+   thread anchored to the whole twin (anchor_type `domain`, ref
+   `digital-twin`). It lazily fetches `/ontology/load` once, caches the
+   result, and builds the comment tag vocabulary from the ontology's
+   classes/relationships.
+2. Added the discuss button to every Digital Twin section header:
+   `_query_insights.html`, `_query_dataquality.html`,
+   `_query_reasoning.html`, `_query_cohorts.html`,
+   `_query_sigmagraph.html`, `_query_graphql.html`, `_query_chat.html`
+   (each `onclick="openTwinDiscussion()"`).
+
+### Decisions
+- Whole-twin discussion uses anchor `domain`/`digital-twin` (distinct from
+  the ontology designer's `domain`/`ontology` and the mapping layer's
+  `mapping`/`mapping` threads); the SigmaGraph per-node/edge Discuss
+  buttons remain for graph-element-specific threads.
+- Tag vocabulary is fetched lazily on first open (the query page has no
+  persistent clean ontology config global) and cached in `_twinTaggable`.
+- `comments-panel.js` is already loaded globally via `base.html`, so the
+  Digital Twin page reuses the same thread panel + tag picker.
+
+### Tests
+- Frontend-only; no Python surface changed.
+
+## Digital Twin discuss button — position fix
+
+### Context
+The discuss button rendered to the left of the existing header actions; it
+should sit to the right of them. Also confirmed the "openTwinDiscussion is
+not defined" runtime error was a stale browser cache (`asset_version` is
+`APP_VERSION.<startup_time>`, only bumped on server restart) — the function
+is correctly defined globally in `query.js`.
+
+### Changes
+1. Moved the discuss button to the rightmost position of every Digital Twin
+   section header action group: `_query_insights.html`,
+   `_query_dataquality.html`, `_query_reasoning.html`, `_query_cohorts.html`,
+   `_query_sigmagraph.html`, `_query_graphql.html`, `_query_chat.html`.
+
+### Tests
+- Frontend-only; `node --check query.js` passes.
+
+## Ontology + Mapping discuss button — position fix
+
+### Context
+Apply the same right-alignment to the Ontology and Mapping pages so the
+discuss button consistently sits to the right of the other header actions.
+
+### Changes
+1. Mapping partials — moved the discuss button to the rightmost slot:
+   `_mapping_information.html`, `_mapping_design.html`, `_mapping_manual.html`,
+   `_mapping_autoassign.html`, `_mapping_diagnostics.html`,
+   `_mapping_r2rml.html`, `_mapping_sparksql.html`.
+2. Ontology partials — same reposition: `_ontology_design.html`,
+   `_ontology_entities.html`, `_ontology_relationships.html`,
+   `_ontology_dataquality.html`, `_ontology_business_rules.html`,
+   `_ontology_cohorts.html`, `_pitfalls.html`.
+3. `src/front/static/ontology/js/ontology-init.js` —
+   `injectOntologyDiscussButtons()` now appends the button as the last
+   (rightmost) header element (after any existing actions group) instead of
+   slotting it right after the title. Covers JS-injected sections (Groups,
+   Wizard, etc.).
+4. `_ontology_map.html` `#mapDiscuss` was already rightmost — unchanged.
+
+### Tests
+- Frontend-only; `node --check ontology-init.js` passes; one
+  `onto-discuss-btn` per partial verified (no duplicates).
+
+## Mapping Import — add missing discuss button
+
+### Context
+The Import R2RML mapping section was the only mapping page without a discuss
+button.
+
+### Changes
+1. `_mapping_import.html` — added the rightmost discuss button
+   (`openMappingDiscussion()`) to the section header.
+
+### Tests
+- Frontend-only.
+
+## Ontology Import — add missing discuss button
+
+### Context
+The Ontology Import section was previously excluded; user now wants it
+covered too.
+
+### Changes
+1. `_ontology_import.html` — added the rightmost discuss button
+   (`openOntologyDiscussion()`) statically. The `onto-discuss-btn` class
+   means the JS injector skips it (no duplicate), independent of its
+   existing `#import-section` exclusion.
+
+### Tests
+- Frontend-only.
+
+## Ontology Generate (Wizard) — static rightmost discuss button
+
+### Context
+The Generate Ontology section relied on the JS injector for its discuss
+button; make it static and rightmost (after "Generate Ontology") for
+reliability, matching the other sections.
+
+### Changes
+1. `_ontology_wizard.html` — added a static discuss button after the
+   "Generate Ontology" action (title gets `me-auto`). The `onto-discuss-btn`
+   class makes the JS injector skip it (no duplicate).
+
+### Tests
+- Frontend-only.
+
+## Discussion + tasks code — centralized (DRY)
+
+### Context
+Ensure the discussion pane and its task code are a single shared module
+across the whole app, with no per-surface duplication.
+
+### Audit findings
+- The discussion pane (comments, replies, **task creation**, resolve, tags,
+  assignee picker) lives entirely in the global
+  `src/front/static/global/js/comments-panel.js`, loaded once via
+  `base.html` — already common to every page. Surfaces only call the
+  `window.OntoComments` API (`openThread` / `openForSelection`).
+- `task-tracker.js` is a separate concept (async long-running jobs), not the
+  collaborative tasks of the discussion pane — left as-is.
+- The "My Tasks" worklist (`registry-my-tasks.js`, `home-tasks.js`) is a
+  read-only display feature, already modular — left as-is.
+- Only real duplication: the per-surface "build a comment tag vocabulary
+  from ontology classes/properties" logic was copy-pasted in three files.
+
+### Changes
+1. `comments-panel.js` — added `OntoComments.taggableFromOntology(config)`
+   as the single shared builder for the `{type, ref, label}[]` tag
+   vocabulary; exposed on the global API.
+2. `ontology-map.js` `openOntologyDiscussion()`, `mapping-shared.js`
+   `openMappingDiscussion()`, and `query.js` `openTwinDiscussion()` now call
+   `OntoComments.taggableFromOntology(...)` instead of each rebuilding the
+   list (removed ~45 duplicated lines).
+
+### Tests
+- Frontend-only; `node --check` passes on all four files; no linter errors.
+
+## Domain → Collaboration page (My Tasks + Discussions timeline)
+
+### Context
+A single place in the Domain area that concentrates every collaborative
+signal: the user's tasks first, then all discussions as an activity timeline.
+
+### Changes
+1. `src/front/config/menu_config.json` — new "Collaboration" group in the
+   Domain menu, placed before "Management", with two items: "My Tasks"
+   (`mytasks`) and "Discussions" (`discussions`).
+2. `domain.html` — added `#mytasks-section` and `#discussions-section`
+   (partials below), plus the new CSS/JS includes.
+3. `partials/domain/_domain_mytasks.html` — My Tasks section shell.
+4. `partials/domain/_domain_discussions.html` — Discussions section shell
+   with a "Show resolved" switch + refresh.
+5. `src/front/static/domain/js/domain-collaboration.js` — new module:
+   - My Tasks: reuses `GET /review/my-tasks` to render "Assigned to me"
+     tasks (Start/Done via `/comments/.../tasks/{id}/status`) and the
+     review worklist (Review → loads the domain and deep-links to
+     `?section=review`).
+   - Discussions: pulls every comment for the domain via
+     `GET /comments/{folder}/{version}` (no anchor filter), merges roots +
+     replies, sorts newest-first, groups by day, and renders an activity
+     timeline. Each entry shows author, anchor badge (Class/Property/
+     Mapping/Node/Edge/Domain), body, and tag chips; clicking re-opens the
+     thread through the shared `OntoComments.openThread(...)`.
+   - Hooks the global `sidebarSectionChanged` event (no coupling to
+     `domain.js`).
+6. `src/front/static/domain/css/domain-collaboration.css` — timeline styling.
+7. `comments-panel.js` — exposed `OntoComments.parseBody` and
+   `OntoComments.anchorLabel(type)` so the timeline reuses the panel's body
+   parsing + anchor labels (no duplication).
+
+### Decisions
+- No backend changes: the page composes existing endpoints
+  (`/review/my-tasks`, `/comments/{folder}/{version}`,
+  `/domain/version-status`, task status).
+- Domain context (folder/version) resolved from `/domain/version-status`,
+  matching the panel's own resolution.
+
+### Tests
+- Frontend-only; `node --check` passes; `menu_config.json` validates; no
+  linter errors.
+
+## Create task — "Assign to me" shortcut
+
+### Context
+Make it one click to assign a new task to oneself from the discussion pane.
+
+### Changes
+1. `comments-panel.js` — the "New task from this comment" form now has an
+   "Assign to me" link and marks the current user "(me)" in the assignee
+   dropdown. Current user is resolved once via `GET /domain/current-user`
+   (cached, prefetched on panel open). `assignToMe()` selects the user,
+   adding an option for them if they're not in the roster.
+
+### Decisions
+- Shared in the global panel, so the shortcut appears on every surface
+  (ontology / mapping / twin / domain) automatically.
+- Backend `create_task` only requires a non-empty assignee, so self-assign
+  needs no API change.
+
+### Tests
+- Frontend-only; `node --check` passes; no linter errors.

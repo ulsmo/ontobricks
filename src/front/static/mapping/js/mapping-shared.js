@@ -31,23 +31,9 @@ function openMappingDiscussion() {
     if (!window.OntoComments) return;
     const ont = (typeof MappingState !== 'undefined' && MappingState.loadedOntology)
         ? MappingState.loadedOntology : {};
-    const taggable = [];
-    (ont.classes || []).forEach(function (c) {
-        taggable.push({
-            type: 'ontology_class',
-            ref: c.uri || c.name,
-            label: (c.emoji || '🔷') + ' ' + (c.name || c.uri),
-        });
-    });
-    (ont.properties || []).forEach(function (p) {
-        taggable.push({
-            type: 'ontology_property',
-            ref: p.uri || p.name,
-            label: '🔗 ' + (p.name || p.uri),
-        });
-    });
     window.OntoComments.openForSelection(
-        'mapping', 'mapping', 'Mappings', taggable
+        'mapping', 'mapping', 'Mappings',
+        window.OntoComments.taggableFromOntology(ont)
     );
 }
 

@@ -37,6 +37,8 @@
     let offcanvas = null;
     let ctx = null;          // { folder, version, anchorType, anchorRef, anchorLabel }
     let membersCache = {};   // key folder/version -> [members]
+    let currentUser = null;  // current user's email/principal (for "Assign to me")
+    let currentUserPromise = null;
 
     function esc(text) {
         if (typeof window.escapeHtml === 'function') return window.escapeHtml(text);
@@ -251,6 +253,7 @@
         }
         await reload();
         loadMembers();
+        loadCurrentUser();
     }
 
     async function reload() {
@@ -275,6 +278,19 @@
             list.innerHTML = '<div class="alert alert-danger small mb-0">Network error: ' +
                 esc(String(err)) + '</div>';
         }
+    }
+
+    // Resolve the signed-in user once (for the "Assign to me" shortcut).
+    function loadCurrentUser() {
+        if (currentUserPromise) return currentUserPromise;
+        currentUserPromise = fetch('/domain/current-user', { credentials: 'same-origin' })
+            .then((r) => r.json())
+            .then((d) => {
+                currentUser = (d && d.success && d.email) ? d.email : null;
+                return currentUser;
+            })
+            .catch(() => { currentUser = null; return null; });
+        return currentUserPromise;
     }
 
     async function loadMembers() {
@@ -396,21 +412,48 @@
         const members = membersCache[ctx.folder + '/' + ctx.version] || [];
         const opts = members.map((m) =>
             '<option value="' + escAttr(m.principal) + '">' +
-            esc(m.display_name || m.principal) + ' (' + esc(m.role) + ')</option>'
+            esc(m.display_name || m.principal) +
+            (m.principal === currentUser ? ' (me)' : '') +
+            ' (' + esc(m.role) + ')</option>'
         ).join('');
         box.innerHTML =
             '<div class="oc-task-form border rounded p-2">' +
             '<div class="small fw-medium mb-2"><i class="bi bi-check2-square me-1"></i>New task from this comment</div>' +
             '<input type="text" class="form-control form-control-sm mb-2" data-tk-title placeholder="Task title">' +
+            '<div class="d-flex align-items-center justify-content-between mb-1">' +
+            '<label class="form-label small text-muted mb-0">Assignee</label>' +
+            '<button type="button" class="btn btn-link btn-sm p-0" data-tk-me>' +
+            '<i class="bi bi-person-check me-1"></i>Assign to me</button>' +
+            '</div>' +
             '<select class="form-select form-select-sm mb-2" data-tk-assignee>' +
             '<option value="">Assign to...</option>' + opts + '</select>' +
             '<input type="date" class="form-control form-control-sm mb-2" data-tk-due title="Due date (optional)">' +
             '<div class="d-flex justify-content-end">' +
             '<button type="button" class="btn btn-sm btn-success" data-tk-create>Create task</button>' +
             '</div></div>';
+        box.querySelector('[data-tk-me]').addEventListener('click', () => {
+            assignToMe(box);
+        });
         box.querySelector('[data-tk-create]').addEventListener('click', () => {
             createTask(rootId, box);
         });
+    }
+
+    // Select the current user in the assignee picker, adding an option for
+    // them when they are not already in the roster.
+    async function assignToMe(box) {
+        const me = await loadCurrentUser();
+        if (!me) { notify('Could not determine the current user', 'warning'); return; }
+        const sel = box.querySelector('[data-tk-assignee]');
+        if (!sel) return;
+        const exists = Array.from(sel.options).some((o) => o.value === me);
+        if (!exists) {
+            const opt = document.createElement('option');
+            opt.value = me;
+            opt.textContent = me + ' (me)';
+            sel.appendChild(opt);
+        }
+        sel.value = me;
     }
 
     async function postComment(body, parentId, ta, scope) {
@@ -534,6 +577,28 @@
     }
 
     /**
+     * Build the comment tag vocabulary ({type, ref, label}[]) from an
+     * ontology config ({ classes, properties }). Shared by every surface
+     * (ontology designer, mapping, digital twin) so the entity/relationship
+     * tag picker is built identically everywhere.
+     */
+    function taggableFromOntology(config) {
+        const cfg = config || {};
+        const out = [];
+        (cfg.classes || []).forEach((c) => out.push({
+            type: 'ontology_class',
+            ref: c.uri || c.name,
+            label: (c.emoji || '🔷') + ' ' + (c.name || c.uri),
+        }));
+        (cfg.properties || []).forEach((p) => out.push({
+            type: 'ontology_property',
+            ref: p.uri || p.name,
+            label: '🔗 ' + (p.name || p.uri),
+        }));
+        return out;
+    }
+
+    /**
      * Open a thread for a selection on an editor surface, auto-resolving
      * the loaded domain + version. Use from ontology / mapping / graph.
      * `taggable` (optional) is a vocabulary of {type, ref, label} entities
@@ -560,5 +625,11 @@
     window.OntoComments = {
         openThread: openThread,
         openForSelection: openForSelection,
+        taggableFromOntology: taggableFromOntology,
+        // Split a stored comment body into { text, tags } (strips the
+        // internal tag marker). Shared with the Domain → Discussions timeline.
+        parseBody: parseBody,
+        // Human label for an anchor type (Class / Property / Mapping / …).
+        anchorLabel: function (type) { return ANCHOR_LABELS[type] || 'Item'; },
     };
 })();
