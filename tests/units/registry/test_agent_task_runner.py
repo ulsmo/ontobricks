@@ -329,3 +329,30 @@ def test_resume_skips_when_already_running(monkeypatch):
     finally:
         runner._ACTIVE_TASKS.discard("T1")
     assert started is None
+
+
+def test_claim_task_is_idempotent_per_id():
+    assert "T9" not in runner._ACTIVE_TASKS
+    try:
+        assert runner._claim_task("T9") is True       # first claim wins
+        assert runner._claim_task("T9") is False       # already active
+        assert runner._claim_task("") is False         # empty id never claims
+    finally:
+        runner._ACTIVE_TASKS.discard("T9")
+
+
+def test_launch_failure_releases_the_claim(monkeypatch):
+    tm = MagicMock()
+    tm.run_background_task.side_effect = RuntimeError("thread boom")
+    monkeypatch.setattr(
+        "back.core.task_manager.get_task_manager", lambda: tm
+    )
+    assert "T7" not in runner._ACTIVE_TASKS
+    with pytest.raises(RuntimeError):
+        runner._launch_worker(
+            svc=MagicMock(), domain=MagicMock(), host="h", token="t",
+            llm_endpoint="ep", warehouse_id="", folder="d", version="v",
+            task_id="T7", title="x", description="", comment_id="root",
+        )
+    # The claim must NOT leak when the launch raises.
+    assert "T7" not in runner._ACTIVE_TASKS

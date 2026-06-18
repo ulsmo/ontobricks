@@ -16,6 +16,7 @@ routers, but is keyed off task assignment instead of a dedicated endpoint.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from back.core.logging import get_logger
@@ -32,6 +33,65 @@ AI_AGENT_LABEL = "AI Agent"
 # (Single-process app; reset on restart, which is fine — a stale entry only
 # delays one resume.)
 _ACTIVE_TASKS: set[str] = set()
+_ACTIVE_LOCK = threading.Lock()
+
+
+def _claim_task(task_id: str) -> bool:
+    """Atomically mark *task_id* active. Returns False if already running."""
+    if not task_id:
+        return False
+    with _ACTIVE_LOCK:
+        if task_id in _ACTIVE_TASKS:
+            return False
+        _ACTIVE_TASKS.add(task_id)
+        return True
+
+
+def _launch_worker(
+    *,
+    svc: Any,
+    domain: Any,
+    host: str,
+    token: str,
+    llm_endpoint: str,
+    warehouse_id: str,
+    folder: str,
+    version: str,
+    task_id: str,
+    title: str,
+    description: str,
+    comment_id: str,
+) -> Optional[str]:
+    """Claim the task and launch the background plan-or-run worker.
+
+    Returns the background task id, or ``None`` when the task is already running.
+    On launch failure the claim is released and the exception propagates to the
+    caller (``start_agent_task`` / ``resume_agent_task``) to handle.
+    """
+    from back.core.task_manager import get_task_manager
+
+    if not _claim_task(task_id):
+        return None
+    try:
+        tm = get_task_manager()
+        bg = tm.run_background_task(
+            f"AI Agent: {title}"[:80],
+            "task_router",
+            _run,
+            steps=[
+                {"name": "route", "description": "Selecting the right agent"},
+                {"name": "plan", "description": "Confirming scope with you"},
+                {"name": "run", "description": "Running the selected agent"},
+            ],
+            svc=svc, domain=domain, host=host, token=token,
+            llm_endpoint=llm_endpoint, warehouse_id=warehouse_id,
+            folder=folder, version=version, domain_task_id=task_id,
+            title=title, description=description, comment_id=comment_id,
+        )
+        return bg.id
+    except Exception:
+        _ACTIVE_TASKS.discard(task_id)
+        raise
 
 
 def is_ai_agent(assignee: str) -> bool:
@@ -60,7 +120,6 @@ def start_agent_task(
     ``None`` when the job could not be started.
     """
     from back.core.helpers import require_serving_llm, resolve_warehouse_id
-    from back.core.task_manager import get_task_manager
 
     try:
         host, token, llm_endpoint = require_serving_llm(domain, settings)
@@ -78,36 +137,20 @@ def start_agent_task(
     except Exception:  # noqa: BLE001
         warehouse_id = ""
 
-    _ACTIVE_TASKS.add(task_id)
-    tm = get_task_manager()
-    task = tm.run_background_task(
-        f"AI Agent: {title}"[:80],
-        "task_router",
-        _run,
-        steps=[
-            {"name": "route", "description": "Selecting the right agent"},
-            {"name": "plan", "description": "Confirming scope with you"},
-            {"name": "run", "description": "Running the selected agent"},
-        ],
-        svc=svc,
-        domain=domain,
-        host=host,
-        token=token,
-        llm_endpoint=llm_endpoint,
-        warehouse_id=warehouse_id,
-        folder=folder,
-        version=version,
-        domain_task_id=task_id,
-        title=title,
-        description=description,
-        comment_id=comment_id,
+    bg_id = _launch_worker(
+        svc=svc, domain=domain, host=host, token=token,
+        llm_endpoint=llm_endpoint, warehouse_id=warehouse_id,
+        folder=folder, version=version, task_id=task_id,
+        title=title, description=description, comment_id=comment_id,
     )
+    if bg_id is None:
+        return None
     logger.info(
         "agent_task_runner: started background task %s for domain_task %s",
-        task.id,
+        bg_id,
         task_id,
     )
-    return task.id
+    return bg_id
 
 
 def resume_agent_task(
@@ -126,11 +169,10 @@ def resume_agent_task(
     logged and surfaced as a comment.
     """
     task_id = str(task.get("id") or "")
-    if not task_id or task_id in _ACTIVE_TASKS:
+    if not task_id:
         return None
 
     from back.core.helpers import require_serving_llm, resolve_warehouse_id
-    from back.core.task_manager import get_task_manager
 
     comment_id = str(task.get("comment_id") or "")
     title = str(task.get("title") or "")
@@ -145,24 +187,16 @@ def resume_agent_task(
     except Exception:  # noqa: BLE001
         warehouse_id = ""
 
-    _ACTIVE_TASKS.add(task_id)
-    tm = get_task_manager()
-    bg = tm.run_background_task(
-        f"AI Agent: {title}"[:80],
-        "task_router",
-        _run,
-        steps=[
-            {"name": "route", "description": "Selecting the right agent"},
-            {"name": "plan", "description": "Confirming scope with you"},
-            {"name": "run", "description": "Running the selected agent"},
-        ],
+    bg_id = _launch_worker(
         svc=svc, domain=domain, host=host, token=token,
         llm_endpoint=llm_endpoint, warehouse_id=warehouse_id,
-        folder=folder, version=version, domain_task_id=task_id,
+        folder=folder, version=version, task_id=task_id,
         title=title, description=description, comment_id=comment_id,
     )
-    logger.info("agent_task_runner: resumed task %s (bg=%s)", task_id, bg.id)
-    return bg.id
+    if bg_id is None:
+        return None
+    logger.info("agent_task_runner: resumed task %s (bg=%s)", task_id, bg_id)
+    return bg_id
 
 
 # ---------------------------------------------------------------------------
