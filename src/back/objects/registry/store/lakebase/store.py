@@ -1510,6 +1510,32 @@ class LakebaseRegistryStore(RegistryStore):
             "stats": dict(r["stats"] or {}),
         }
 
+    def stamp_last_build(
+        self, folder: str, version: str, ts: str
+    ) -> Tuple[bool, str]:
+        """Targeted UPDATE for ``domain_versions.last_build``.
+
+        Avoids a full read + re-write of the JSONB blobs: only the scalar
+        ``last_build`` column is touched.  Returns ``(ok, message)``.
+        """
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {self._q(self._schema)}.domain_versions v
+                       SET last_build = %s
+                      FROM {self._q(self._schema)}.domains d
+                     WHERE d.id         = v.domain_id
+                       AND d.registry_id = %s
+                       AND d.folder     = %s
+                       AND v.version    = %s
+                    """,
+                    (ts, self._registry(), folder, version),
+                )
+            return True, ""
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)
+
     def load_build_runs(
         self,
         folder: str,

@@ -646,6 +646,27 @@ originating comment, or a **kickoff comment** created for standalone tasks). An
 in-process guard (`_ACTIVE_TASKS` + a lock) prevents a reply from starting a
 second concurrent run for the same task.
 
+**Discussion pane UI** (`comments-panel.js`): while the offcanvas is open it
+polls `/comments/{f}/{v}/tasks` and `/tasks/` (every 4s, only while AI work is in
+flight) so the agent's question and outcome appear live. An AI-Agent task thread
+shows a status chip — *working…* / **waiting for your reply** / *queued* /
+*done* — driven by the `domain_tasks` status plus any active `task_router`
+background run. A top-of-panel progress strip mirrors the header task-tracker
+(animated bar + current step) for the active run. When a task is parked, the
+thread renders a prominent **"Answer the AI Agent"** box; sending it posts a
+reply that triggers `resume_agent_task`. Re-renders are change-detected and
+deferred while the user is typing so an open answer box is never lost.
+
+When the panel observes an AI-Agent task transition to `done`, it dispatches a
+global `ontobricks:design-updated` event (transition-guarded so it never fires
+on initial paint). Design-consuming pages subscribe and pull the agent's saved
+changes live: the **ontology page** (`ontology-init.js`) re-runs
+`loadOntologyFromSession()` and re-initialises the active section
+(`_initSectionByName`), so the designer/map reflect the new model; the
+**mapping page** (`mapping-init.js`) re-fetches the loaded ontology into
+`MappingState` and redraws. This is the mechanism that keeps the *Ontology
+Assistant*'s in-place edits visible without a manual reload.
+
 Dispatchable agents: `ontology_assistant` (in-place ontology edits, applied),
 `owl_generator`, `business_rules_generator`, `icon_assign`, `auto_assignment`.
 Interactive chat agents (dtwin chat, cohort) are excluded because they need a

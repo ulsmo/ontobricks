@@ -1249,6 +1249,24 @@ class _BuildPipeline:
             }
             svc = RegistryService.from_context(self.domain, self.settings)
             svc.record_build_run(folder, entry)
+            if status == "success" and version:
+                build_ts = getattr(self.domain, "last_build", "") or entry.get(
+                    "finished_at", ""
+                )
+                if build_ts:
+                    ok, msg = svc._store.stamp_last_build(folder, str(version), build_ts)
+                    if ok:
+                        logger.info(
+                            "[DT-BUILD %s] stamped last_build=%s in registry",
+                            self.task_id,
+                            build_ts,
+                        )
+                    else:
+                        logger.warning(
+                            "[DT-BUILD %s] stamp_last_build failed (non-fatal): %s",
+                            self.task_id,
+                            msg,
+                        )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "[DT-BUILD %s] could not record build-run trace "

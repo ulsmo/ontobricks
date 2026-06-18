@@ -115,6 +115,32 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// When an AI Agent finishes a task that edited & saved the ontology, the
+// Discussion panel fires `ontobricks:design-updated`. Pull the agent's changes
+// into session state and re-render whichever ontology section is active so the
+// designer (and every other section) reflects the new model without a manual
+// reload. Idempotent and version-guarded (initOntologyDesigner skips reload
+// when the fingerprint is unchanged).
+window.addEventListener('ontobricks:design-updated', async function () {
+    try {
+        if (typeof loadOntologyFromSession === 'function') {
+            await loadOntologyFromSession();
+        }
+        if (typeof window.refreshOntologyStatus === 'function') {
+            window.refreshOntologyStatus();
+        }
+        if (typeof SidebarNav !== 'undefined' &&
+            typeof SidebarNav.getActiveSection === 'function') {
+            _initSectionByName(SidebarNav.getActiveSection());
+        }
+        if (typeof showNotification === 'function') {
+            showNotification("Ontology refreshed with the AI Agent's changes", 'info', 3000);
+        }
+    } catch (e) {
+        console.error('[Ontology] design-updated refresh failed', e);
+    }
+});
+
 /**
  * Add a "Discuss" button to every ontology section header (except Import)
  * so the ontology discussion can be opened from anywhere. The Model/Designer

@@ -13,6 +13,27 @@ document.body.classList.add('full-width-layout');
 // Configure sidebar navigation with callbacks
 window.SIDEBAR_NAV_MANUAL_INIT = true;
 
+// When an AI Agent finishes a task that edited & saved the ontology, the
+// Discussion panel fires `ontobricks:design-updated`. The mapping page derives
+// its entity/relationship rows from the ontology, so re-pull the loaded
+// ontology into MappingState and redraw the design.
+window.addEventListener('ontobricks:design-updated', async function () {
+    try {
+        const resp = await fetch('/ontology/get-loaded-ontology',
+            { credentials: 'same-origin' });
+        const result = await resp.json();
+        if (result.success && result.ontology && typeof MappingState !== 'undefined') {
+            MappingState.loadedOntology = result.ontology;
+        }
+        if (typeof refreshMappingDesign === 'function') refreshMappingDesign();
+        if (typeof updateMappingCompletionStatus === 'function') {
+            updateMappingCompletionStatus();
+        }
+    } catch (e) {
+        console.error('[Mapping] design-updated refresh failed', e);
+    }
+});
+
 // Main initialization function
 async function initializeMappingPage() {
     console.log('Mapping Page: Starting initialization...');

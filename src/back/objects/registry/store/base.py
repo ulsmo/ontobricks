@@ -306,6 +306,25 @@ class RegistryStore(ABC):
         NOT raise (log + swallow on failure).
         """
 
+    def stamp_last_build(
+        self, folder: str, version: str, ts: str
+    ) -> Tuple[bool, str]:
+        """Lightweight update: write *ts* into ``domain_versions.last_build``
+        for ``(folder, version)`` without touching any other column.
+
+        Default implementation falls back to a full ``read_version`` +
+        ``write_version`` round-trip so that stores which do not override
+        this method still work correctly (at higher cost).
+
+        Returns ``(ok, message)``.
+        """
+        ok, data, msg = self.read_version(folder, version)
+        if not ok:
+            return False, f"stamp_last_build read failed: {msg}"
+        info = data.setdefault("info", {})
+        info["last_build"] = ts
+        return self.write_version(folder, version, data)
+
     @abstractmethod
     def load_build_runs(
         self,

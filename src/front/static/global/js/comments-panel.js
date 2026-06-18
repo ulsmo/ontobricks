@@ -33,12 +33,22 @@
         domain: 'Domain',
     };
 
+    // Sentinel assignee that routes the task to the AI Agent (see
+    // back/objects/registry/agent_task_runner.AI_AGENT_PRINCIPAL).
+    const AI_AGENT_PRINCIPAL = 'agent://router';
+
     let el = null;
     let offcanvas = null;
     let ctx = null;          // { folder, version, anchorType, anchorRef, anchorLabel }
     let membersCache = {};   // key folder/version -> [members]
     let currentUser = null;  // current user's email/principal (for "Assign to me")
     let currentUserPromise = null;
+    let aiTasksByComment = {};  // root comment_id -> AI-Agent DomainTask (this version)
+    let agentRuns = [];         // active task_router background runs (from /tasks/)
+    let panelPollTimer = null;  // live-refresh timer while the panel is open
+    let lastListSig = '';       // signature of the last rendered comment set
+    let aiStatusSnapshot = {};  // comment_id -> last-seen AI task status (transition guard)
+    let aiSnapshotReady = false;// becomes true after the first AI-task load (baseline)
 
     function esc(text) {
         if (typeof window.escapeHtml === 'function') return window.escapeHtml(text);
@@ -50,6 +60,20 @@
 
     function escAttr(text) {
         return esc(text).replace(/"/g, '&quot;');
+    }
+
+    // Render a comment body's markdown to HTML. Uses `marked` (loaded globally
+    // in base.html, same as the ontology chat assistant); falls back to escaped
+    // text with <br> when it isn't available.
+    function renderMarkdown(text) {
+        const src = text || '';
+        if (typeof window.marked !== 'undefined' && window.marked.parse) {
+            try {
+                window.marked.setOptions({ breaks: true, gfm: true });
+                return window.marked.parse(src);
+            } catch (e) { /* fall through to plain text */ }
+        }
+        return esc(src).replace(/\n/g, '<br>');
     }
 
     function notify(msg, kind) {
@@ -72,9 +96,14 @@
             '<i class="bi bi-chat-dots me-2"></i>Discussion</h6>' +
             '<div class="small text-muted" data-oc-anchor></div>' +
             '</div>' +
+            '<button type="button" class="btn btn-sm btn-outline-success me-2" ' +
+            'data-oc-new-task title="Create a task (assign to a teammate or the AI Agent)">' +
+            '<i class="bi bi-check2-square me-1"></i>New task</button>' +
             '<button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>' +
             '</div>' +
             '<div class="offcanvas-body d-flex flex-column p-0">' +
+            '<div class="oc-newtask-box border-bottom p-3 d-none" data-oc-newtask></div>' +
+            '<div class="oc-agent-strip border-bottom px-3 py-2 d-none" data-oc-agent-strip></div>' +
             '<div class="oc-comments-list flex-grow-1 p-3" data-oc-list></div>' +
             '<div class="oc-comments-compose border-top p-3" data-oc-compose>' +
             '<textarea class="form-control form-control-sm mb-2" rows="2" ' +
@@ -92,6 +121,8 @@
             const ta = compose.querySelector('[data-oc-input]');
             postComment((ta.value || '').trim(), null, ta, compose);
         });
+        el.querySelector('[data-oc-new-task]').addEventListener('click', openNewTask);
+        el.addEventListener('hidden.bs.offcanvas', stopPanelPolling);
     }
 
     // Render the anchor badge in the header for the active scope.
@@ -213,6 +244,14 @@
             return;
         }
         build();
+        // Reset AI-Agent live-status state for the new context.
+        stopPanelPolling();
+        agentRuns = [];
+        aiTasksByComment = {};
+        aiStatusSnapshot = {};
+        aiSnapshotReady = false;
+        lastListSig = '';
+        renderAgentStrip();
         // Optional tag vocabulary: a list of {type, ref, label} entities and
         // relationships the author can attach to individual comments.
         const taggable = Array.isArray(opts.taggable)
@@ -254,6 +293,7 @@
         await reload();
         loadMembers();
         loadCurrentUser();
+        ensureAgentTracking();
     }
 
     async function reload() {
@@ -273,7 +313,10 @@
                     esc(data.message || 'Failed to load comments') + '</div>';
                 return;
             }
-            renderList(list, data.comments || []);
+            await loadAiTasks();
+            const comments = data.comments || [];
+            renderList(list, comments);
+            lastListSig = listSignature(comments);
         } catch (err) {
             list.innerHTML = '<div class="alert alert-danger small mb-0">Network error: ' +
                 esc(String(err)) + '</div>';
@@ -310,6 +353,215 @@
         }
     }
 
+    // ---- AI-Agent live status ----------------------------------------------
+    // An AI-Agent task runs asynchronously: a short "working" phase
+    // (route -> plan -> run) then it parks in_progress, waiting for the
+    // author's reply. We surface both states — a progress strip at the top of
+    // the panel and a per-thread chip — and poll while the panel is open so
+    // the agent's questions and outcomes appear without a manual refresh.
+
+    // Load this version's AI-Agent tasks, keyed by their thread-root comment.
+    async function loadAiTasks() {
+        aiTasksByComment = {};
+        try {
+            const resp = await fetch(
+                '/comments/' + encodeURIComponent(ctx.folder) + '/' +
+                encodeURIComponent(ctx.version) + '/tasks',
+                { credentials: 'same-origin' }
+            );
+            const data = await resp.json();
+            if (!resp.ok || !data.success) return;
+            (data.tasks || []).forEach((t) => {
+                if ((t.assignee || '').toLowerCase() !== AI_AGENT_PRINCIPAL) return;
+                const cid = t.comment_id || '';
+                if (cid) aiTasksByComment[cid] = t;
+            });
+            announceAgentCompletions();
+        } catch (err) { /* best-effort: chips just won't show */ }
+    }
+
+    // Fire a global "design updated" event when an AI-Agent task transitions to
+    // done, so design-consuming pages (ontology designer, mapping, …) can pull
+    // the agent's saved changes and re-render. The first load only records a
+    // baseline — we never refresh on initial paint, only on a live transition.
+    function announceAgentCompletions() {
+        const statuses = {};
+        Object.keys(aiTasksByComment).forEach((k) => {
+            statuses[k] = aiTasksByComment[k].status;
+        });
+        if (!aiSnapshotReady) {
+            aiStatusSnapshot = statuses;
+            aiSnapshotReady = true;
+            return;
+        }
+        const completed = Object.keys(statuses).filter((k) => {
+            const prev = aiStatusSnapshot[k];
+            return statuses[k] === 'done' && prev && prev !== 'done';
+        });
+        aiStatusSnapshot = statuses;
+        if (completed.length) {
+            window.dispatchEvent(new CustomEvent('ontobricks:design-updated', {
+                detail: { source: 'agent', commentIds: completed },
+            }));
+        }
+    }
+
+    // Active AI-Agent background runs (the router/plan/run worker).
+    async function loadAgentRuns() {
+        agentRuns = [];
+        try {
+            const resp = await fetch('/tasks/', { credentials: 'same-origin' });
+            const data = await resp.json();
+            if (!data || !data.success) return;
+            agentRuns = (data.tasks || []).filter((t) =>
+                t.task_type === 'task_router' &&
+                (t.status === 'pending' || t.status === 'running'));
+        } catch (err) { /* best-effort: strip just stays hidden */ }
+    }
+
+    function isAgentWorking() { return agentRuns.length > 0; }
+
+    // Any in-flight AI-Agent work on this version (running OR parked/queued)?
+    function hasLiveAgentWork() {
+        if (isAgentWorking()) return true;
+        return Object.keys(aiTasksByComment).some((k) => {
+            const s = aiTasksByComment[k].status;
+            return s === 'in_progress' || s === 'open';
+        });
+    }
+
+    // Render the top progress strip from the active background run(s).
+    function renderAgentStrip() {
+        const strip = el && el.querySelector('[data-oc-agent-strip]');
+        if (!strip) return;
+        if (!agentRuns.length) {
+            strip.classList.add('d-none');
+            strip.innerHTML = '';
+            return;
+        }
+        const run = agentRuns[0];
+        const pct = Math.max(3, Math.min(100, Number(run.progress) || 0));
+        let step = run.message || '';
+        if (run.steps && run.steps.length && run.current_step < run.steps.length) {
+            step = run.steps[run.current_step].description || step;
+        }
+        const extra = agentRuns.length > 1
+            ? ' <span class="text-muted">(+' + (agentRuns.length - 1) + ' more)</span>'
+            : '';
+        strip.classList.remove('d-none');
+        strip.innerHTML =
+            '<div class="d-flex align-items-center gap-2 mb-1">' +
+            '<span class="oc-agent-spin"><i class="bi bi-robot"></i></span>' +
+            '<span class="small fw-semibold">' + esc(run.name || 'AI Agent') + '</span>' +
+            extra +
+            '</div>' +
+            '<div class="progress" style="height:4px;">' +
+            '<div class="progress-bar progress-bar-striped progress-bar-animated" ' +
+            'style="width:' + pct + '%"></div></div>' +
+            (step ? '<div class="small text-muted mt-1">' + esc(step) + '</div>' : '');
+    }
+
+    // Refresh the AI strip and (re)start polling whenever there is live work.
+    async function ensureAgentTracking() {
+        await loadAgentRuns();
+        renderAgentStrip();
+        if (hasLiveAgentWork() && !panelPollTimer) startPanelPolling();
+    }
+
+    function startPanelPolling() {
+        stopPanelPolling();
+        panelPollTimer = setInterval(panelPollTick, 4000);
+    }
+
+    function stopPanelPolling() {
+        if (panelPollTimer) { clearInterval(panelPollTimer); panelPollTimer = null; }
+    }
+
+    async function panelPollTick() {
+        if (!el || !ctx) { stopPanelPolling(); return; }
+        await loadAgentRuns();
+        await loadAiTasks();
+        renderAgentStrip();
+        // Re-render the thread list only when the comment set changed, and
+        // never while the user is mid-reply (don't clobber an open answer box).
+        if (!userIsComposing()) {
+            const list = el.querySelector('[data-oc-list]');
+            try {
+                const url = '/comments/' + encodeURIComponent(ctx.folder) + '/' +
+                    encodeURIComponent(ctx.version) +
+                    '?anchor_type=' + encodeURIComponent(ctx.anchorType) +
+                    '&anchor_ref=' + encodeURIComponent(ctx.anchorRef);
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                const data = await resp.json();
+                if (resp.ok && data.success) {
+                    const comments = data.comments || [];
+                    const sig = listSignature(comments);
+                    if (sig !== lastListSig) {
+                        renderList(list, comments);
+                        lastListSig = sig;
+                    }
+                }
+            } catch (err) { /* keep the last render on a transient error */ }
+        }
+        // Once everything is idle, stop polling to avoid needless traffic.
+        if (!hasLiveAgentWork()) stopPanelPolling();
+    }
+
+    // True while the user is actively typing a reply/answer somewhere in the
+    // panel — used to defer disruptive list re-renders during polling.
+    function userIsComposing() {
+        if (!el) return false;
+        const active = document.activeElement;
+        if (active && el.contains(active) && active.tagName === 'TEXTAREA') return true;
+        return Array.from(el.querySelectorAll('textarea'))
+            .some((t) => (t.value || '').trim().length > 0);
+    }
+
+    // Cheap change-detector for the rendered comment set + AI task statuses,
+    // so polling only re-renders when something actually changed.
+    function listSignature(comments) {
+        const base = comments.map((c) => c.id + ':' + (c.created_at || '')).join('|');
+        const ai = Object.keys(aiTasksByComment).sort()
+            .map((k) => k + '=' + aiTasksByComment[k].status).join('|');
+        return comments.length + '#' + base + '#' + (isAgentWorking() ? 'W' : '') + '#' + ai;
+    }
+
+    // Status chip shown atop an AI-Agent task thread.
+    function agentChipHtml(t) {
+        let cls = 'oc-agent-chip';
+        let icon = 'bi-robot';
+        let label = 'AI Agent';
+        if (t.status === 'done') {
+            cls += ' oc-agent-done'; icon = 'bi-check-circle-fill'; label = 'AI Agent · done';
+        } else if (t.status === 'cancelled') {
+            cls += ' oc-agent-done'; icon = 'bi-slash-circle'; label = 'AI Agent · cancelled';
+        } else if (t.status === 'in_progress' && isAgentWorking()) {
+            cls += ' oc-agent-working'; icon = 'bi-robot'; label = 'AI Agent · working…';
+        } else if (t.status === 'in_progress') {
+            cls += ' oc-agent-waiting'; icon = 'bi-hourglass-split';
+            label = 'AI Agent · waiting for your reply';
+        } else if (t.status === 'open') {
+            cls += ' oc-agent-queued'; icon = 'bi-clock'; label = 'AI Agent · queued';
+        }
+        return '<div class="' + cls + ' mb-2"><i class="bi ' + icon + ' me-1"></i>' +
+            esc(label) + '</div>';
+    }
+
+    // Prominent, always-visible answer box on a parked AI-Agent thread. A reply
+    // here resumes the agent (see CommentService._maybe_resume_agent).
+    function agentAnswerHtml(rootId, t) {
+        if (!(t.status === 'in_progress' && !isAgentWorking())) return '';
+        return '<div class="oc-agent-answer" data-agent-answer="' + escAttr(rootId) + '">' +
+            '<div class="small fw-semibold mb-1">' +
+            '<i class="bi bi-reply me-1"></i>Answer the AI Agent</div>' +
+            '<textarea class="form-control form-control-sm mb-2" rows="2" ' +
+            'placeholder="Type your answer to continue…"></textarea>' +
+            '<div class="d-flex justify-content-end">' +
+            '<button type="button" class="btn btn-sm btn-primary" data-agent-send="' +
+            escAttr(rootId) + '"><i class="bi bi-send me-1"></i>Send answer</button>' +
+            '</div></div>';
+    }
+
     function renderList(list, comments) {
         if (!comments.length) {
             list.innerHTML =
@@ -336,9 +588,13 @@
     function threadHtml(root, replies) {
         const replyHtml = replies.map((r) => bubble(r, true)).join('');
         const resolvedCls = root.resolved ? ' oc-resolved' : '';
-        return '<div class="oc-thread' + resolvedCls + '" data-thread="' + escAttr(root.id) + '">' +
+        const aiTask = aiTasksByComment[root.id];
+        const aiCls = aiTask ? ' oc-thread-agent' : '';
+        return '<div class="oc-thread' + resolvedCls + aiCls + '" data-thread="' + escAttr(root.id) + '">' +
+            (aiTask ? agentChipHtml(aiTask) : '') +
             bubble(root, false) +
             '<div class="oc-replies">' + replyHtml + '</div>' +
+            (aiTask ? agentAnswerHtml(root.id, aiTask) : '') +
             '<div class="oc-thread-tools">' +
             '<button type="button" class="btn btn-link btn-sm p-0 me-3" data-reply="' + escAttr(root.id) + '">' +
             '<i class="bi bi-reply me-1"></i>Reply</button>' +
@@ -366,7 +622,7 @@
             '<span class="oc-time">' + formatTime(c.created_at) + '</span>' +
             (c.resolved && !isReply ? '<span class="badge bg-success-subtle text-success border ms-2">Resolved</span>' : '') +
             '</div>' +
-            '<div class="oc-text">' + esc(parsed.text) + '</div>' +
+            '<div class="oc-text oc-md">' + renderMarkdown(parsed.text) + '</div>' +
             tagsHtml(parsed.tags) +
             '</div></div>';
     }
@@ -382,6 +638,16 @@
         });
         list.querySelectorAll('button[data-task]').forEach((btn) => {
             btn.addEventListener('click', () => toggleTask(btn.dataset.task));
+        });
+        // Answering a parked AI-Agent thread: a reply here resumes the agent.
+        list.querySelectorAll('button[data-agent-send]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const box = btn.closest('[data-agent-answer]');
+                const ta = box ? box.querySelector('textarea') : null;
+                const text = ta ? (ta.value || '').trim() : '';
+                postComment(text, btn.dataset.agentSend, ta, box)
+                    .then(() => ensureAgentTracking());
+            });
         });
     }
 
@@ -404,21 +670,24 @@
         ta.focus();
     }
 
-    function toggleTask(rootId) {
-        const box = el.querySelector('[data-task-box="' + cssEsc(rootId) + '"]');
-        if (!box) return;
-        if (box.style.display !== 'none') { box.style.display = 'none'; return; }
-        box.style.display = '';
+    // Build the inner markup of a task-creation form. Shared by the
+    // per-comment task box and the standalone "New task" box in the header.
+    function taskFormHtml(heading, withCancel) {
         const members = membersCache[ctx.folder + '/' + ctx.version] || [];
-        const opts = members.map((m) =>
-            '<option value="' + escAttr(m.principal) + '">' +
-            esc(m.display_name || m.principal) +
-            (m.principal === currentUser ? ' (me)' : '') +
-            ' (' + esc(m.role) + ')</option>'
-        ).join('');
-        box.innerHTML =
-            '<div class="oc-task-form border rounded p-2">' +
-            '<div class="small fw-medium mb-2"><i class="bi bi-check2-square me-1"></i>New task from this comment</div>' +
+        const opts = members.map((m) => {
+            const label = m.principal_type === 'agent'
+                ? '\uD83E\uDD16 ' + esc(m.display_name || 'AI Agent') + ' (auto)'
+                : esc(m.display_name || m.principal) +
+                  (m.principal === currentUser ? ' (me)' : '') +
+                  ' (' + esc(m.role) + ')';
+            return '<option value="' + escAttr(m.principal) + '">' + label + '</option>';
+        }).join('');
+        const cancel = withCancel
+            ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-tk-cancel>Cancel</button>'
+            : '';
+        return '<div class="oc-task-form border rounded p-2">' +
+            '<div class="small fw-medium mb-2"><i class="bi bi-check2-square me-1"></i>' +
+            esc(heading) + '</div>' +
             '<input type="text" class="form-control form-control-sm mb-2" data-tk-title placeholder="Task title">' +
             '<div class="d-flex align-items-center justify-content-between mb-1">' +
             '<label class="form-label small text-muted mb-0">Assignee</label>' +
@@ -428,15 +697,63 @@
             '<select class="form-select form-select-sm mb-2" data-tk-assignee>' +
             '<option value="">Assign to...</option>' + opts + '</select>' +
             '<input type="date" class="form-control form-control-sm mb-2" data-tk-due title="Due date (optional)">' +
-            '<div class="d-flex justify-content-end">' +
+            '<div class="d-flex justify-content-end gap-2">' + cancel +
             '<button type="button" class="btn btn-sm btn-success" data-tk-create>Create task</button>' +
             '</div></div>';
+    }
+
+    function wireTaskForm(box, commentId) {
         box.querySelector('[data-tk-me]').addEventListener('click', () => {
             assignToMe(box);
         });
         box.querySelector('[data-tk-create]').addEventListener('click', () => {
-            createTask(rootId, box);
+            createTask(commentId, box);
         });
+        const cancel = box.querySelector('[data-tk-cancel]');
+        if (cancel) cancel.addEventListener('click', () => hideTaskBox(box));
+        const sel = box.querySelector('[data-tk-assignee]');
+        if (sel) sel.addEventListener('change', () => syncDueVisibility(box));
+        syncDueVisibility(box);
+    }
+
+    // The AI Agent runs the task immediately, so a due date is meaningless —
+    // hide (and clear) it whenever the AI Agent is the selected assignee.
+    function syncDueVisibility(box) {
+        const sel = box.querySelector('[data-tk-assignee]');
+        const due = box.querySelector('[data-tk-due]');
+        if (!sel || !due) return;
+        const isAgent = sel.value === AI_AGENT_PRINCIPAL;
+        due.classList.toggle('d-none', isAgent);
+        if (isAgent) due.value = '';
+    }
+
+    function hideTaskBox(box) {
+        box.innerHTML = '';
+        box.style.display = 'none';
+        box.classList.add('d-none');
+    }
+
+    function toggleTask(rootId) {
+        const box = el.querySelector('[data-task-box="' + cssEsc(rootId) + '"]');
+        if (!box) return;
+        if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+        box.classList.remove('d-none');
+        box.style.display = '';
+        box.innerHTML = taskFormHtml('New task from this comment', false);
+        wireTaskForm(box, rootId);
+    }
+
+    // Standalone task creation (not tied to a comment), opened from the
+    // panel header. Lets the user assign a task to a teammate or the AI Agent.
+    async function openNewTask() {
+        const box = el.querySelector('[data-oc-newtask]');
+        if (!box) return;
+        if (!box.classList.contains('d-none')) { hideTaskBox(box); return; }
+        await loadMembers();
+        box.classList.remove('d-none');
+        box.style.display = '';
+        box.innerHTML = taskFormHtml('New task', true);
+        wireTaskForm(box, null);
     }
 
     // Select the current user in the assignee picker, adding an option for
@@ -454,6 +771,7 @@
             sel.appendChild(opt);
         }
         sel.value = me;
+        syncDueVisibility(box);
     }
 
     async function postComment(body, parentId, ta, scope) {
@@ -484,6 +802,7 @@
             const chips = scope && scope.querySelector('[data-oc-tag-chips]');
             if (chips) chips.innerHTML = '';
             await reload();
+            ensureAgentTracking();
         } catch (err) {
             notify('Error: ' + err.message, 'error');
         }
@@ -540,8 +859,15 @@
                 notify(data.message || 'Failed to create task', 'error');
                 return;
             }
-            notify('Task assigned to ' + assignee, 'success');
-            box.style.display = 'none';
+            if (data.agent_task_id) {
+                notify('AI Agent started — routing your task to the right agent', 'success');
+                if (typeof window.refreshTasks === 'function') { window.refreshTasks(); }
+            } else {
+                notify('Task assigned to ' + assignee, 'success');
+            }
+            hideTaskBox(box);
+            await reload();
+            if (data.agent_task_id) ensureAgentTracking();
         } catch (err) {
             notify('Error: ' + err.message, 'error');
         }
