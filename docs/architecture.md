@@ -446,10 +446,13 @@ src/
 │   ├── llm_utils.py                    # Shared LLM call with retry (429/503 backoff)
 │   ├── serialization.py                # Agent serialization utilities
 │   ├── tracing.py                      # MLflow tracing setup & decorators
+│   ├── registry.py                     # Static registry of router-dispatchable agents
 │   ├── tools/                          # Shared agent tools (ontology, mapping, metadata, SQL, etc.)
 │   ├── agent_owl_generator/            # OWL ontology generation agent
 │   ├── agent_auto_assignment/          # Entity/relationship → SQL mapping agent
 │   ├── agent_auto_icon_assign/         # Emoji icon mapping agent
+│   ├── agent_task_router/              # Routes an AI-Agent task to the right agent
+│   ├── agent_task_planner/             # Gates an AI-Agent task: ask clarifying questions vs. run
 │   └── agent_ontology_assistant/       # Conversational assistant + ResponsesAgent wrapper
 │
 └── mcp-server/                         # MCP Server (separate Databricks App)
@@ -595,6 +598,7 @@ Long-running operations use the **TaskManager** pattern (`src/back/core/task_man
 | `triplestore_sync` | Digital Twin → Build | Generates and writes triples to Delta and the configured Graph DB engine (Lakebase) |
 | `quality_checks` | Digital Twin → Quality | Runs all quality checks sequentially with per-check progress |
 | `auto_assign` | Mapping → Auto-Map | Batch-maps entities and relationships via LLM; splits large jobs into chunks of `AUTO_ASSIGN_CHUNK_SIZE` with cooldown between chunks to avoid rate limits |
+| `task_router` | Collaborative task assigned to the **AI Agent** | Routes the task, then confirms scope with the assignee (clarifying questions) before dispatching the chosen agent against the task's domain (see [AI Agent task assignment](#ai-agent-task-assignment)) |
 
 **How it works:**
 1. Frontend sends a `POST` to start the task; backend creates a `TaskManager` task and spawns a `threading.Thread`
@@ -602,6 +606,50 @@ Long-running operations use the **TaskManager** pattern (`src/back/core/task_man
 3. Backend thread updates progress (percentage, current step message) via `TaskManager`
 4. On completion, the task result is returned to the frontend, which saves mappings and updates the UI
 5. If the user navigates away and returns, the frontend resumes monitoring from `sessionStorage`
+
+### AI Agent task assignment
+
+Collaborative tasks (created from the comments panel) can be assigned to a
+virtual **AI Agent** instead of a human teammate. The AI Agent is a sentinel
+principal (`agent://router`, defined in
+`src/back/objects/registry/agent_task_runner.py`) that `CommentService.list_assignees`
+always offers first in the assignee picker.
+
+When a task is created with this assignee, `CommentService.create_task` launches
+a `task_router` background job. To keep the AI Agent from acting on a vague
+request, it **always confirms scope before running** — the job runs a
+clarify-then-run loop driven by the task's Discussion thread:
+
+1. **Route** — `agents/agent_task_router` (a single-shot LLM classifier) reads
+   the task title/description and the static registry of dispatchable agents
+   (`src/agents/registry.py`) and returns the best-matching agent key. The router
+   runs at temperature 0, so re-running it on each pass yields the same agent
+   (the route is effectively *locked*; no key is persisted).
+2. **Plan** — the orchestrator marks the `domain_tasks` row `in_progress`,
+   reconstructs the clarification Q&A from the task's comment thread, and runs
+   `agents/agent_task_planner`. The planner returns `ready` only once the
+   assignee has replied with enough to proceed; on the first pass (no replies)
+   it always posts a short plan + clarifying question and the job parks, leaving
+   the task `in_progress`.
+3. **Resume** — when the assignee replies on the thread,
+   `CommentService.add_comment` calls `resume_agent_task`, which relaunches the
+   same worker. It re-plans against the now-richer thread and either asks another
+   question (multi-round) or proceeds.
+4. **Run** — once the planner is `ready`, the chosen agent runs against the
+   task's domain session (the **Ontology Assistant** edits and *saves* the
+   ontology in place; the others produce proposals via the existing domain
+   bridges). The task is marked `done` and the outcome is posted to the thread.
+   Failures leave the task with an explanatory comment.
+
+Linkage uses the thread root: every AI-Agent task has a `comment_id` (the
+originating comment, or a **kickoff comment** created for standalone tasks). An
+in-process guard (`_ACTIVE_TASKS` + a lock) prevents a reply from starting a
+second concurrent run for the same task.
+
+Dispatchable agents: `ontology_assistant` (in-place ontology edits, applied),
+`owl_generator`, `business_rules_generator`, `icon_assign`, `auto_assignment`.
+Interactive chat agents (dtwin chat, cohort) are excluded because they need a
+live conversation rather than a one-shot task.
 
 ### Scheduled Builds (BuildScheduler)
 
