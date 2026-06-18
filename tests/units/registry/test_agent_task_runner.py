@@ -95,7 +95,14 @@ def test_start_agent_task_returns_none_when_llm_unconfigured():
 
 
 def test_run_happy_path_routes_dispatches_and_completes():
-    svc, statuses, comments = _fake_svc()
+    # Thread with a human reply beyond the root (2 user turns) so the
+    # code-enforced first-pass park does NOT apply and the ready path runs.
+    svc, statuses, comments = _svc_with_thread([
+        {"id": "c1", "parent_id": "", "author": "alice@x.io",
+         "body": "Generate ontology", "created_at": "t0"},
+        {"id": "r1", "parent_id": "c1", "author": "alice@x.io",
+         "body": "go ahead", "created_at": "t1"},
+    ])
     tm = get_task_manager()
     task = tm.create_task("AI Agent: x", "task_router", steps=[
         {"name": "route", "description": "r"},
@@ -151,7 +158,13 @@ def test_run_router_failure_leaves_task_open():
 
 
 def test_run_dispatch_exception_is_recorded_as_failure():
-    svc, statuses, comments = _fake_svc()
+    # A replied-to thread (2 user turns) so the ready path reaches dispatch.
+    svc, statuses, comments = _svc_with_thread([
+        {"id": "c1", "parent_id": "", "author": "alice@x.io",
+         "body": "Generate ontology", "created_at": "t0"},
+        {"id": "r1", "parent_id": "c1", "author": "alice@x.io",
+         "body": "go ahead", "created_at": "t1"},
+    ])
     tm = get_task_manager()
     task = tm.create_task("AI Agent: x", "task_router")
 
@@ -162,7 +175,7 @@ def test_run_dispatch_exception_is_recorded_as_failure():
             task, svc=svc, domain=MagicMock(), host="h", token="t",
             llm_endpoint="ep", warehouse_id="", folder="acme", version="1",
             domain_task_id="t1", title="Generate ontology", description="",
-            comment_id="",
+            comment_id="c1",
         )
 
     final = tm.get_task(task.id)
@@ -264,6 +277,36 @@ def test_first_pass_parks_with_plan_and_stays_in_progress(monkeypatch):
     assert dispatched == []                      # agent did NOT run
     assert "in_progress" in statuses             # parked
     assert any("Plan: remove Person?" in c for c in comments)
+
+
+def test_first_pass_parks_even_when_planner_ready(monkeypatch):
+    # Only the root comment (one human turn) -> first pass. Even though the
+    # planner says ready, the code-level guard must override and park.
+    svc, statuses, comments = _svc_with_thread(
+        [{"id": "root", "parent_id": "", "author": "alice@x.io",
+          "body": "Remove Person", "created_at": "t0",
+          "anchor_type": "domain", "anchor_ref": ""}]
+    )
+    router_res = SimpleNamespace(success=True, chosen_agent_key="ontology_assistant",
+                                 reasoning="edit", error="")
+    plan_res = SimpleNamespace(success=True, ready=True, message="Plan: confirm?",
+                               error="")
+    monkeypatch.setattr("agents.agent_task_router.run_agent", lambda *a, **k: router_res)
+    monkeypatch.setattr("agents.agent_task_planner.run_agent", lambda *a, **k: plan_res)
+    dispatched = []
+    monkeypatch.setattr(runner, "_dispatch_agent",
+                        lambda *a, **k: dispatched.append(k) or ("s", "r", {}))
+
+    runner._run_for_task(
+        svc=svc, domain=MagicMock(), host="h", token="t", llm_endpoint="ep",
+        warehouse_id="", folder="d", version="v", domain_task_id="T1",
+        title="Remove Person", description="", comment_id="root",
+        on_step=lambda m: None, tm=None, tm_task_id=None,
+    )
+
+    assert dispatched == []                       # guard overrode planner readiness
+    assert statuses[-1] == "in_progress"          # parked, never marked done
+    assert "done" not in statuses
 
 
 def test_resume_runs_agent_when_planner_ready(monkeypatch):

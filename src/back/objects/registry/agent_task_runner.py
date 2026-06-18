@@ -4,14 +4,22 @@ and the specialized OntoBricks agents.
 
 When a collaborative task is created with the AI-agent sentinel assignee
 (:data:`AI_AGENT_PRINCIPAL`), :func:`start_agent_task` spins up a background
-:class:`~back.core.task_manager.TaskManager` job that:
+:class:`~back.core.task_manager.TaskManager` job that runs a *plan-or-run* loop:
 
-1. runs :mod:`agents.agent_task_router` to pick the best agent for the task,
-2. dispatches that agent against the task's domain session (blocking),
-3. records the outcome back on the ``domain_tasks`` row + the review audit log.
+1. route -- :mod:`agents.agent_task_router` picks the best agent (deterministic,
+   so the choice is stable on every pass),
+2. reconstruct the clarification Q&A from the task's Discussion thread,
+3. plan -- :mod:`agents.agent_task_planner` decides whether the scope is clear,
+4. on the FIRST pass (no human reply yet beyond the task statement) -- or when
+   the planner is not ready -- post a short plan/question and *park* the task
+   (status stays ``in_progress``). The first-pass park is code-enforced, not
+   left to the planner's prompt.
 
-This mirrors the existing background-agent pattern in the ontology / mapping
-routers, but is keyed off task assignment instead of a dedicated endpoint.
+A teammate's reply on the thread relaunches the same worker via
+:func:`resume_agent_task`; an in-process guard prevents double concurrent runs.
+Once the planner is ready (and a human has replied), the chosen agent runs with
+the answers folded in, the outcome is posted to the Discussion, and the task is
+marked ``done``.
 """
 
 from __future__ import annotations
@@ -298,8 +306,16 @@ def _run_for_task(
             agent=spec, history=history, on_step=on_step,
         )
 
+        # Always confirm scope before doing any work: the very first pass (no
+        # human reply yet beyond the task statement) must park and ask, no matter
+        # what the planner returns. This makes the guarantee code-enforced rather
+        # than relying on the planner's prompt.
+        human_turns = sum(1 for h in history if h.get("role") == "user")
+        first_pass = human_turns <= 1
+        ready = plan.ready and not first_pass
+
         # 3a) Not ready -> post the plan/question and park (stay in_progress).
-        if not plan.ready:
+        if not ready:
             question = plan.message or (
                 "Could you clarify the scope of this task before I proceed?"
             )
