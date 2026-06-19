@@ -5,16 +5,22 @@ description = "Ontology Management Tool for Databricks"
 requires-python = ">=3.10"
 dependencies = [
     # fastapi>=0.129.0 added Starlette 1.0.0+ support (needed for the
-    # starlette>=1.0.1 BadHost fix below).
+    # starlette>=1.3.0 BadHost fix below).
     "fastapi>=0.129.0",
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
-    "python-multipart>=0.0.27",
-    # starlette>=1.0.1: BadHost (CVE-2026-48710 / GHSA-86qp-5c8j-p5mr) — missing
-    # Host-header validation poisons request.url.path, bypassing path-based auth.
+    # python-multipart>=0.0.30: quadratic-time querystring parsing with semicolon
+    # separators (CVE-2026-53539 / GHSA-5rvq-cxj2-64vf), parameter smuggling via
+    # semicolons (CVE-2026-53538), negative Content-Length memory allocation
+    # (GHSA-h8vp-42mj-3c4x), and RFC 2231 param smuggling (GHSA-4w6j-v5jc-5fqr).
+    "python-multipart>=0.0.30",
+    # starlette>=1.3.0: fixes BadHost (CVE-2026-48710 / GHSA-86qp-5c8j-p5mr).
+    # TARGET: >=1.3.1 once the proxy mirrors it — that release also fixes form()
+    # limits silently ignored for application/x-www-form-urlencoded DoS
+    # (CVE-2026-54283 / GHSA-82w8-qh3p-5jfq).
     # Requires fastapi>=0.129 (Starlette 1.0 support added upstream Feb 2026).
-    "starlette>=1.0.1",
+    "starlette>=1.3.0",
     "itsdangerous>=2.1.0",
     "jinja2>=3.1.0",
     "aiofiles>=23.0.0",
@@ -31,7 +37,9 @@ dependencies = [
     # (CVE-2026-47707 / GHSA-fr49-mhgj-crfc) and circular-fragment DOS in
     # QueryDepthLimiter — both DOS via resource exhaustion.
     "strawberry-graphql[fastapi]>=0.315.7",
-    "mlflow>=3.11.1",
+    # mlflow>=3.13.0: earlier versions require cryptography<47 which conflicts
+    # with the cryptography>=48.0.1 security constraint below.
+    "mlflow>=3.13.0",
     "apscheduler>=3.10,<4",
     "owlrl>=7.0.0",
     "pyshacl>=0.26.0",
@@ -52,7 +60,10 @@ lakebase = [
 pitfalls = [
     "sentence-transformers>=3.0.0",
     "scikit-learn>=1.3.0",
-    "nltk>=3.8.0",
+    # nltk: TARGET >=3.10.0 once the proxy mirrors it — that release fixes
+    # URL-encoded path traversal in nltk.data.load() (CVE-2026-54293 /
+    # GHSA-p4gq-832x-fm9v). Proxy currently tops out at 3.9.4.
+    "nltk>=3.9.4",
     "scipy>=1.11.0",
 ]
 
@@ -110,7 +121,31 @@ constraint-dependencies = [
     # aiohttp 3.14.0 fixes two issues (pulled in transitively by mlflow):
     #   GHSA-jg22-mg44-37j8 (CVE-2026-34993)  CookieJar.load() pickle deserialization RCE
     #   GHSA-hg6j-4rv6-33pg (CVE-2026-47265)  per-request cookies leaked on cross-origin redirect
-    "aiohttp>=3.14.0",
+    # aiohttp 3.14.1 additionally fixes (all Moderate/Low):
+    #   GHSA-xcgm-r5h9-7989 (CVE-2026-54274)  incomplete WS frame payloads bypass memory limits
+    #   GHSA-g3cq-j2xw-wf74 (CVE-2026-54278)  compressed request bodies bypass client_max_size
+    #   GHSA-jc7f-gxrc-qvfp (CVE-2026-54275)  HTTP/1 pipelined requests queue without limit
+    #   GHSA-4wfr-65wf-jgh8 (CVE-2026-54276)  C HTTP parser bypasses max_line_size
+    #   GHSA-hq6q-c2x6-hmch (CVE-2026-54277)  DigestAuth applies credentials to cross-origin redirects
+    #   GHSA-7m7x-8h22-2jmj (CVE-2026-54279)  payload resources not closed after mid-body disconnect
+    #   GHSA-mx4r-wm4h-xw27 (CVE-2026-54280)  TLS server hostname override ignored on reused HTTPS conn
+    #   GHSA-f94q-p6mj-vj6r (CVE-2026-54281)  host-only cookies become domain cookies after persistence
+    "aiohttp>=3.14.1",
+    # cryptography>=48.0.1: vulnerable OpenSSL bundled in wheels prior to 48.0.1
+    # (CVE-2026-34180 / GHSA-537c-gmf6-5ccf). OS-level patches do not help since
+    # OpenSSL is statically linked inside the wheel.
+    "cryptography>=48.0.1",
+    # pyjwt: TARGET >=2.13.0 once the proxy mirrors it (proxy tops out at
+    # 2.10.1). That release bundles five fixes:
+    #   GHSA-xgmm-8j9v-c9wx (CVE-2026-48526)  public-key JWK accepted as HMAC secret → HS256 forgery
+    #   GHSA-jq35-7prp-9v3f (CVE-2026-48527)  PyJWK algorithm allow-list bypass
+    #   GHSA-r5fg-8rfm-jfxq (CVE-2026-48528)  DoS via unbounded Base64URL decoding (b64=false JWS)
+    #   GHSA-vqx6-w8qr-234h (CVE-2026-48529)  PyJWKClient SSRF via file://, ftp://, data: schemes
+    #   GHSA-hpqf-4wfj-9qcc (CVE-2026-48530)  PyJWKClient unbounded JWKS endpoint requests (DoS)
+    "pyjwt>=2.10.1",
+    # torch>=2.7.0 fixes memory corruption in torch.jit.script (CVE-2025-3000 /
+    # GHSA-rrmf-rvhw-rf47). Already resolved at 2.11.0; constraint documents intent.
+    "torch>=2.7.0",
 ]
 
 [tool.pytest.ini_options]

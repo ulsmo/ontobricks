@@ -105,3 +105,68 @@ ones are Playwright tests that time out against a live app server
 `tests/units/api/*` ones pass both in isolation and when run together as a
 group (full-suite import/ordering pollution). None of the failures are in the
 registry-store, build-pipeline, or SQL-warehouse areas touched by this work.
+
+---
+
+# 2026-06-19 — Dependabot security fixes (Closes #37, #42–#58 partial)
+
+## Security: dependency bumps for Dependabot advisories
+
+**Context:** GitHub Dependabot opened 22 alerts against the project's
+`uv.lock`.  The alerts span six packages: `aiohttp`, `cryptography`,
+`python-multipart`, `pyjwt`, `starlette`, and `nltk`, plus a low-severity
+`torch` advisory.  Three packages (`starlette` 1.3.1, `nltk` 3.10.0,
+`PyJWT` 2.13.0) were not yet available on the internal Databricks PyPI proxy
+at the time of this fix and are tracked as PENDING proxy sync.
+
+**Changes:**
+
+1. `pyproject.toml` — bumped `python-multipart` to `>=0.0.30`:
+   closes quadratic-time DoS via semicolons (CVE-2026-53539), parameter
+   smuggling (CVE-2026-53538), negative Content-Length OOM (GHSA-h8vp-42mj-3c4x),
+   RFC 2231 param smuggling (GHSA-4w6j-v5jc-5fqr).  Locked at 0.0.32.
+
+2. `pyproject.toml` — bumped `starlette` to `>=1.3.0` (BadHost fix);
+   target `>=1.3.1` is documented and will be applied once the proxy mirrors it
+   to additionally close form() limits DoS (CVE-2026-54283 / GHSA-82w8-qh3p-5jfq).
+   Locked at 1.3.0.
+
+3. `pyproject.toml` — bumped `mlflow` to `>=3.13.0` to unblock the
+   `cryptography` upgrade (mlflow ≤3.12.0 caps `cryptography<47`; 3.13.0 allows
+   `<49`).  Locked at 3.13.0 (mlflow-skinny + mlflow-tracing follow).
+
+4. `pyproject.toml` `[tool.uv] constraint-dependencies` — bumped `aiohttp`
+   constraint to `>=3.14.1`: closes 8 aiohttp advisories (incomplete WS frame
+   payloads CVE-2026-54274, compressed body zip-bomb CVE-2026-54278, pipelined
+   queue CVE-2026-54275, C parser line-size CVE-2026-54276, DigestAuth
+   cross-origin CVE-2026-54277, payload disconnect CVE-2026-54279, TLS hostname
+   override CVE-2026-54280, host-only cookie CVE-2026-54281).  Locked at 3.14.1.
+
+5. `pyproject.toml` `[tool.uv] constraint-dependencies` — added
+   `cryptography>=48.0.1`: closes vulnerable-OpenSSL-in-wheel advisory
+   (CVE-2026-34180 / GHSA-537c-gmf6-5ccf).  Locked at 48.0.1.
+
+6. `pyproject.toml` `[tool.uv] constraint-dependencies` — added
+   `torch>=2.7.0`: documents CVE-2025-3000 fix; already satisfied by locked
+   version 2.11.0.
+
+7. `pyproject.toml` `[tool.uv] constraint-dependencies` — added pending
+   `pyjwt>=2.10.1` with TARGET comment `>=2.13.0` (five CVEs: algorithm
+   confusion GHSA-xgmm-8j9v-c9wx, allow-list bypass GHSA-jq35-7prp-9v3f,
+   DoS GHSA-r5fg-8rfm-jfxq, SSRF GHSA-vqx6-w8qr-234h, DoS GHSA-hpqf-4wfj-9qcc).
+
+8. `pyproject.toml` `[project.optional-dependencies].pitfalls` — added
+   pending comment TARGET `>=3.10.0` for nltk (CVE-2026-54293 /
+   GHSA-p4gq-832x-fm9v path traversal).
+
+**Files modified:**
+- `pyproject.toml`
+- `uv.lock`
+
+**Tests:**
+
+Full suite (unit + integration, excluding db/spark/external/e2e): 2563 passed.
+
+Alerts **closed** by this PR: #42, #46, #48–#55.
+Alerts **pending proxy sync** (starlette 1.3.1 / nltk 3.10.0 / PyJWT 2.13.0):
+#38–#41, #44–#45, #47, #56–#58.
