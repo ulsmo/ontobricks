@@ -1257,6 +1257,68 @@ class _BuildPipeline:
                 exc,
             )
 
+    def _persist_last_build_to_registry(self) -> None:
+        """Write last_build to the registry domain_versions row.
+
+        The session/UI build path stamps domain.last_build before the build
+        thread starts; the API path does not.  In both cases the timestamp
+        must reach the DB column so ReviewService.submit() can unblock the
+        Submit-for-Review gate.  Best-effort: a failure is logged but never
+        propagates.
+        """
+        try:
+            from back.objects.registry.RegistryService import RegistryService
+            from back.objects.session import sanitize_domain_folder
+
+            folder = getattr(self.domain, "uc_domain_folder", "") or (
+                sanitize_domain_folder(self.domain_name)
+            )
+            version = (
+                getattr(self.domain_snap, "current_version", None)
+                or getattr(self.domain, "current_version", None)
+                or ""
+            )
+            if not folder or not version:
+                logger.warning(
+                    "[DT-BUILD %s] _persist_last_build_to_registry: "
+                    "cannot resolve folder=%r version=%r — skipping",
+                    self.task_id,
+                    folder,
+                    version,
+                )
+                return
+
+            # API build path never stamps last_build before starting; do it now.
+            if not getattr(self.domain, "last_build", None):
+                self.domain.last_build = datetime.now(timezone.utc).isoformat()
+
+            svc = RegistryService.from_context(self.domain, self.settings)
+            domain_data = self.domain.export_for_save()
+            w_ok, w_msg = svc._store.write_version(folder, version, domain_data)
+            if w_ok:
+                logger.info(
+                    "[DT-BUILD %s] persisted last_build=%s to registry "
+                    "(folder=%s version=%s)",
+                    self.task_id,
+                    self.domain.last_build,
+                    folder,
+                    version,
+                )
+            else:
+                logger.error(
+                    "[DT-BUILD %s] write_version failed when persisting "
+                    "last_build: %s",
+                    self.task_id,
+                    w_msg,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[DT-BUILD %s] could not persist last_build to registry "
+                "(non-fatal — Submit for Review gate may remain blocked): %s",
+                self.task_id,
+                exc,
+            )
+
     def _complete_task(self) -> None:
         duration = time.time() - self.start_time
         logger.info(
@@ -1284,6 +1346,7 @@ class _BuildPipeline:
         msg = f"Full rebuild: {self.triple_count} triples in {duration:.1f}s"
         self.tm.complete_task(self.task_id, result=result_data, message=msg)
         self._record_build_run("success", message=msg)
+        self._persist_last_build_to_registry()
 
     def _fail_unexpected(self, exc: Exception) -> None:
         duration = time.time() - self.start_time
