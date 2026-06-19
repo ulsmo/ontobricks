@@ -20,13 +20,11 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from back.core.errors import InfrastructureError
 from back.objects.digitaltwin._build_pipeline import _BuildPipeline
-from back.objects.registry.RegistryService import RegistryService
 
 
 def _make_pipeline(**overrides: Any) -> _BuildPipeline:
@@ -177,93 +175,3 @@ class TestLogPhase:
         pipe._log_phase("apply", now - 0.1)
         second = pipe.phase_times["apply"]
         assert second < first  # The retry was faster than the first attempt.
-
-
-# --- _persist_last_build -------------------------------------------------
-
-
-_TS = "2026-06-19T09:00:00+00:00"
-
-
-@pytest.mark.unit
-class TestPersistLastBuild:
-    """The interactive/API build must stamp ``last_build`` on the registry
-    version record (the scheduler does this already); otherwise the Submit
-    gate reads an empty ``info.last_build`` and stays blocked."""
-
-    def _pipeline(self, **overrides: Any) -> _BuildPipeline:
-        domain = SimpleNamespace(
-            info={"name": "sales"},
-            uc_domain_folder="sales",
-            current_version="1",
-            last_build="",
-        )
-        return _make_pipeline(
-            domain=domain,
-            domain_snap=SimpleNamespace(current_version="1"),
-            **overrides,
-        )
-
-    def test_stamps_registry_and_session(self) -> None:
-        svc = MagicMock()
-        svc.update_last_build.return_value = (True, "")
-        pipe = self._pipeline()
-        with patch.object(RegistryService, "from_context", return_value=svc):
-            pipe._persist_last_build(_TS)
-        svc.update_last_build.assert_called_once_with("sales", "1", _TS)
-        assert pipe.domain.last_build == _TS
-
-    def test_uses_snapshot_version_when_present(self) -> None:
-        svc = MagicMock()
-        svc.update_last_build.return_value = (True, "")
-        pipe = _make_pipeline(
-            domain=SimpleNamespace(
-                info={"name": "sales"},
-                uc_domain_folder="sales",
-                current_version="3",
-                last_build="",
-            ),
-            domain_snap=SimpleNamespace(current_version="2"),
-        )
-        with patch.object(RegistryService, "from_context", return_value=svc):
-            pipe._persist_last_build(_TS)
-        # Snapshot wins over the live session version.
-        svc.update_last_build.assert_called_once_with("sales", "2", _TS)
-
-    def test_is_non_fatal_when_registry_raises(self) -> None:
-        pipe = self._pipeline()
-        with patch.object(
-            RegistryService, "from_context", side_effect=RuntimeError("registry down")
-        ):
-            # Must not propagate — a healthy build is never failed by a
-            # best-effort stamp.
-            pipe._persist_last_build(_TS)
-
-
-# --- _count_view_triples -------------------------------------------------
-
-
-@pytest.mark.unit
-class TestCountViewTriples:
-    def test_returns_count_on_success(self) -> None:
-        pipe = _make_pipeline()
-        pipe.source_client = MagicMock()
-        pipe.source_client.execute_query.return_value = [{"cnt": 5}]
-        assert pipe._count_view_triples() == 5
-
-    def test_zero_for_genuinely_empty_view(self) -> None:
-        pipe = _make_pipeline()
-        pipe.source_client = MagicMock()
-        pipe.source_client.execute_query.return_value = [{"cnt": 0}]
-        assert pipe._count_view_triples() == 0
-
-    def test_raises_on_count_failure(self) -> None:
-        """A failed count (view missing / transient error) must surface as
-        an error, not be coerced to a healthy zero-triple build."""
-        pipe = _make_pipeline()
-        pipe.source_client = MagicMock()
-        pipe.source_client.execute_query.side_effect = RuntimeError(
-            "[TABLE_OR_VIEW_NOT_FOUND] cannot be found"
-        )
-        with pytest.raises(InfrastructureError):
-            pipe._count_view_triples()

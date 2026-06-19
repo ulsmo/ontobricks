@@ -274,8 +274,6 @@ function openEntityMappingModal(classUri, className) {
         setTimeout(() => switchToEntityTab('wizard-tab'), 100);
     }
     
-    injectMappingDiscussButton('addEntityMappingModal', classUri, className);
-
     const modal = new bootstrap.Modal(document.getElementById('addEntityMappingModal'));
     modal.show();
 }

@@ -79,17 +79,10 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         onSectionChange: function(section) {
             _initSectionByName(section);
-            // Re-assert the discuss button: some sections (re)render their
-            // header on init, which can drop the injected button. The helper
-            // is idempotent, so repeated passes never duplicate it.
-            injectOntologyDiscussButtons();
-            setTimeout(injectOntologyDiscussButtons, 250);
-            setTimeout(injectOntologyDiscussButtons, 700);
         }
     });
     
     initializeDefaultSection();
-    injectOntologyDiscussButtons();
 
     if (initialSection) {
         const link = document.querySelector(`[data-section="${initialSection}"]`);
@@ -114,65 +107,6 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => waitForReady(0), 400);
     }
 });
-
-// When an AI Agent finishes a task that edited & saved the ontology, the
-// Discussion panel fires `ontobricks:design-updated`. Pull the agent's changes
-// into session state and re-render whichever ontology section is active so the
-// designer (and every other section) reflects the new model without a manual
-// reload. Idempotent and version-guarded (initOntologyDesigner skips reload
-// when the fingerprint is unchanged).
-window.addEventListener('ontobricks:design-updated', async function () {
-    try {
-        if (typeof loadOntologyFromSession === 'function') {
-            await loadOntologyFromSession();
-        }
-        if (typeof window.refreshOntologyStatus === 'function') {
-            window.refreshOntologyStatus();
-        }
-        if (typeof SidebarNav !== 'undefined' &&
-            typeof SidebarNav.getActiveSection === 'function') {
-            _initSectionByName(SidebarNav.getActiveSection());
-        }
-        if (typeof showNotification === 'function') {
-            showNotification("Ontology refreshed with the AI Agent's changes", 'info', 3000);
-        }
-    } catch (e) {
-        console.error('[Ontology] design-updated refresh failed', e);
-    }
-});
-
-/**
- * Add a "Discuss" button to every ontology section header (except Import)
- * so the ontology discussion can be opened from anywhere. The Model/Designer
- * section already carries its own toolbar button, so it is skipped.
- */
-function injectOntologyDiscussButtons() {
-    const headers = document.querySelectorAll('.sidebar-content .section-header');
-    headers.forEach(function (header) {
-        if (header.closest('#import-section')) return;
-        if (header.querySelector('.onto-discuss-btn') ||
-            header.querySelector('#mapDiscuss')) return;
-
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn btn-sm btn-outline-primary onto-discuss-btn';
-        btn.title = 'Open the ontology discussion';
-        btn.innerHTML = '<i class="bi bi-chat-dots"></i>';
-        btn.addEventListener('click', function () {
-            if (typeof openOntologyDiscussion === 'function') openOntologyDiscussion();
-        });
-
-        // Consistent placement across every section: push the title left
-        // with me-auto and append the discuss button as the last (rightmost)
-        // element, after any existing actions group.
-        const first = header.firstElementChild;
-        if (first) {
-            first.classList.add('me-auto');
-            btn.classList.add('ms-2');
-        }
-        header.appendChild(btn);
-    });
-}
 
 /**
  * Initialize the default active section after ensuring data is loaded.

@@ -865,20 +865,6 @@ class RegistryService:
             invalidate_registry_cache(self.cache_key)
         return ok, msg
 
-    def update_last_build(
-        self, folder: str, version: str, ts: str
-    ) -> Tuple[bool, str]:
-        """Stamp ``last_build`` for a single (domain, version).
-
-        Targeted single-column update used by every build path so the
-        Submit gate / lifecycle guard see a built version. Invalidates the
-        registry cache so the Validation page reflects it immediately.
-        """
-        ok, msg = self._store.update_last_build(folder, version, ts)
-        if ok:
-            invalidate_registry_cache(self.cache_key)
-        return ok, msg
-
     # -- review / validation audit log -------------------------------
 
     def record_review_event(
@@ -914,84 +900,6 @@ class RegistryService:
     def list_all_review_events(self) -> list:
         """All review events across the registry (oldest-first)."""
         return self._store.list_all_review_events()
-
-    # -- collaborative comments + tasks ------------------------------
-
-    def insert_comment(
-        self,
-        folder: str,
-        version: str,
-        *,
-        author: str,
-        body: str,
-        parent_id: Optional[str] = None,
-    ) -> Optional[dict]:
-        """Append a discussion comment; return the created row or None."""
-        return self._store.insert_comment(
-            folder,
-            version,
-            author=author,
-            body=body,
-            parent_id=parent_id,
-        )
-
-    def list_comments(
-        self,
-        folder: str,
-        version: Optional[str] = None,
-        *,
-        include_resolved: bool = True,
-    ) -> list:
-        """Oldest-first comments for *folder* (optionally scoped to version)."""
-        return self._store.list_comments(
-            folder,
-            version,
-            include_resolved=include_resolved,
-        )
-
-    def resolve_comment(
-        self, folder: str, comment_id: str, *, resolved: bool = True
-    ) -> Tuple[bool, str]:
-        """Flip a comment's ``resolved`` flag."""
-        return self._store.resolve_comment(folder, comment_id, resolved=resolved)
-
-    def insert_task(
-        self,
-        folder: str,
-        version: str,
-        *,
-        assignee: str,
-        created_by: str,
-        title: str,
-        description: str = "",
-        due_date: Optional[str] = None,
-        comment_id: Optional[str] = None,
-    ) -> Optional[dict]:
-        """Create a task; return the created row or None."""
-        return self._store.insert_task(
-            folder,
-            version,
-            assignee=assignee,
-            created_by=created_by,
-            title=title,
-            description=description,
-            due_date=due_date,
-            comment_id=comment_id,
-        )
-
-    def list_tasks(self, folder: str, version: Optional[str] = None) -> list:
-        """Newest-first tasks for *folder* (optionally one *version*)."""
-        return self._store.list_tasks(folder, version)
-
-    def list_tasks_for_assignee(self, assignee: str) -> list:
-        """All tasks across the registry assigned to *assignee*."""
-        return self._store.list_tasks_for_assignee(assignee)
-
-    def update_task_status(
-        self, folder: str, task_id: str, status: str
-    ) -> Tuple[bool, str]:
-        """Set a task's ``status``."""
-        return self._store.update_task_status(folder, task_id, status)
 
     # -- document operations -------------------------------------------
 

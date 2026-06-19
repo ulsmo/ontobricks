@@ -61,38 +61,6 @@ let taxonomyIcons = {};
 let allRelationshipTypes = new Set();
 
 // =====================================================
-// DISCUSSION
-// =====================================================
-
-// Cache the ontology-derived tag vocabulary for the Digital Twin discussion.
-let _twinTaggable = null;
-
-/**
- * Open the Digital Twin discussion. Anchors to the whole twin
- * (domain/'digital-twin'); each comment can optionally be tagged with one or
- * more ontology classes/relationships via the compose-box tag picker. The tag
- * vocabulary is lazily fetched from the loaded ontology and cached.
- */
-async function openTwinDiscussion() {
-    if (!window.OntoComments) return;
-    if (_twinTaggable === null) {
-        _twinTaggable = [];
-        try {
-            const resp = await fetch('/ontology/load', { credentials: 'same-origin' });
-            const data = await resp.json();
-            const cfg = (data && data.success && data.config) ? data.config : {};
-            _twinTaggable = window.OntoComments.taggableFromOntology(cfg);
-        } catch (e) {
-            console.log('Twin discussion: could not load ontology tags:', e.message);
-        }
-    }
-    window.OntoComments.openForSelection(
-        'domain', 'digital-twin', 'Digital Twin', _twinTaggable
-    );
-}
-window.openTwinDiscussion = openTwinDiscussion;
-
-// =====================================================
 // INITIALIZATION
 // =====================================================
 

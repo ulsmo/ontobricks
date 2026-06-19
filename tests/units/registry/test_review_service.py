@@ -7,7 +7,6 @@ caches) are mocked; the focus is the workflow rules and side effects.
 """
 
 import importlib
-from types import SimpleNamespace
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -19,8 +18,6 @@ from back.core.errors import (
     NotFoundError,
     ValidationError,
 )
-from back.objects.digitaltwin._build_pipeline import _BuildPipeline
-from back.objects.registry.RegistryService import RegistryService
 from back.objects.registry.PermissionService import (
     ROLE_ADMIN,
     ROLE_BUILDER,
@@ -141,76 +138,6 @@ def test_submit_wrong_status_conflicts():
     with pytest.raises(ConflictError):
         _call("submit", svc, comment="", user_role=ROLE_ADMIN,
               user_domain_role=ROLE_NONE)
-
-
-def _build_pipeline_for(folder, version):
-    """A `_BuildPipeline` whose `_persist_last_build` derives *folder* and
-    *version* the same way the real interactive/API build does."""
-    domain = SimpleNamespace(
-        info={"name": folder},
-        uc_domain_folder=folder,
-        current_version=version,
-        last_build="",
-    )
-    return _BuildPipeline(
-        tm=MagicMock(),
-        task_id="task-fix",
-        domain=domain,
-        settings={},
-        domain_snap=SimpleNamespace(current_version=version),
-        host="host",
-        token="token",
-        warehouse_id="wh-1",
-        view_table="cat.schema.view",
-        graph_name="g1",
-        r2rml_content="",
-        base_uri="http://ex/",
-        mapping_config={},
-        ontology_config={},
-        delta_cfg={},
-        build_kind="session",
-    )
-
-
-def test_interactive_build_unblocks_submit_gate():
-    """Regression for the 0.5.1 fix: an interactive build that stamps
-    `last_build` on the registry flips the Submit gate from blocked to
-    allowed. Before the fix the build never wrote the registry field, so a
-    healthy DRAFT stayed blocked with the "never been built" banner.
-
-    The build's `_persist_last_build` and `ReviewService.review_detail` are
-    wired to the *same* registry service so the stamp the build writes is the
-    field the gate reads."""
-    svc, info, _ = _make_svc(status="DRAFT", last_build="")
-
-    # Gate starts blocked: the version has no recorded build.
-    blocked = _call("review_detail", svc,
-                    user_role="", user_domain_role=ROLE_BUILDER)
-    assert blocked["actions"]["can_submit"] is False
-    assert "never been built" in blocked["actions"]["submit_blocked_reason"]
-
-    # The build stamps last_build via update_last_build -> mutate the shared
-    # registry record (mirrors the real single-column UPDATE).
-    def _stamp(folder, version, ts):
-        info["last_build"] = ts
-        return True, ""
-
-    svc.update_last_build.side_effect = _stamp
-
-    pipe = _build_pipeline_for("acme", "2")
-    with patch.object(RegistryService, "from_context", return_value=svc):
-        pipe._persist_last_build("2026-06-19T10:00:00+00:00")
-
-    svc.update_last_build.assert_called_once_with(
-        "acme", "2", "2026-06-19T10:00:00+00:00"
-    )
-    assert info["last_build"] == "2026-06-19T10:00:00+00:00"
-
-    # Gate now open for the builder.
-    unblocked = _call("review_detail", svc,
-                      user_role="", user_domain_role=ROLE_BUILDER)
-    assert unblocked["actions"]["can_submit"] is True
-    assert unblocked["actions"]["submit_blocked_reason"] == ""
 
 
 # ----------------------------------------------------------------------
@@ -811,54 +738,3 @@ def test_my_tasks_raises_when_domain_listing_fails():
     svc.list_domain_details_cached.return_value = (False, [], "boom")
     with pytest.raises(InfrastructureError):
         _call_my_tasks(svc)
-
-
-# ----------------------------------------------------------------------
-# My Tasks — assigned collaborative tasks merged into the worklist
-# ----------------------------------------------------------------------
-
-
-def test_my_tasks_includes_assigned_open_and_in_progress():
-    svc = _my_tasks_svc([])  # no review actions, only assigned tasks
-    svc.list_tasks_for_assignee.return_value = [
-        {"id": "1", "folder": "acme", "version": "2", "title": "fix",
-         "status": "open", "assignee": "alice@acme.com"},
-        {"id": "2", "folder": "acme", "version": "2", "title": "wip",
-         "status": "in_progress", "assignee": "alice@acme.com"},
-    ]
-    result = _call_my_tasks(svc)
-    assert result["success"] is True
-    assert result["tasks"] == []
-    assert [t["id"] for t in result["assigned_tasks"]] == ["1", "2"]
-    svc.list_tasks_for_assignee.assert_called_once_with("alice@acme.com")
-
-
-def test_my_tasks_assigned_filters_done_and_cancelled():
-    svc = _my_tasks_svc([])
-    svc.list_tasks_for_assignee.return_value = [
-        {"id": "1", "status": "open"},
-        {"id": "2", "status": "done"},
-        {"id": "3", "status": "cancelled"},
-        {"id": "4", "status": "in_progress"},
-    ]
-    result = _call_my_tasks(svc)
-    assert [t["id"] for t in result["assigned_tasks"]] == ["1", "4"]
-
-
-def test_my_tasks_assigned_resilient_when_backend_errors():
-    svc = _my_tasks_svc([])
-    svc.list_tasks_for_assignee.side_effect = RuntimeError("tasks table missing")
-    result = _call_my_tasks(svc)
-    # Worklist still succeeds; the assigned section degrades to empty.
-    assert result["success"] is True
-    assert result["assigned_tasks"] == []
-
-
-def test_my_tasks_assigned_empty_without_email():
-    svc = _my_tasks_svc([])
-    svc.list_tasks_for_assignee.return_value = [{"id": "1", "status": "open"}]
-    # app_role "" short-circuits roles to admin, but an empty email must
-    # skip the assignee lookup entirely.
-    result = _call_my_tasks(svc, email="")
-    assert result["assigned_tasks"] == []
-    svc.list_tasks_for_assignee.assert_not_called()

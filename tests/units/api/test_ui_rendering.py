@@ -386,8 +386,7 @@ class TestDomainPage:
 
     @pytest.mark.parametrize(
         "section",
-        ["information", "metadata", "documents", "validation", "owl-content",
-         "r2rml", "mytasks", "discussions"],
+        ["information", "metadata", "documents", "validation", "owl-content", "r2rml"],
     )
     def test_sidebar_has_section_link(self, client, section):
         html = _html(client, "/domain")
@@ -398,8 +397,7 @@ class TestDomainPage:
     @pytest.mark.parametrize(
         "section_id",
         ["information-section", "metadata-section", "validation-section",
-         "runs-section", "audit-section", "mytasks-section",
-         "discussions-section"],
+         "runs-section", "audit-section"],
     )
     def test_section_div_exists(self, client, section_id):
         html = _html(client, "/domain")
@@ -410,16 +408,6 @@ class TestDomainPage:
         tags = _tags(html)
         assert any(t == "a" and a.get("data-section") == "audit" for t, a in tags)
         assert any("domain-audit.js" in src for src in _script_srcs(html))
-
-    def test_collaboration_section_assets_loaded(self, client):
-        """The new Domain → Collaboration timeline ships its own JS module
-        and a container the script populates."""
-        html = _html(client, "/domain")
-        assert any(
-            "domain-collaboration.js" in src for src in _script_srcs(html)
-        )
-        assert _find(_tags(html), id_="domainDiscussionsContainer") is not None
-        assert _find(_tags(html), id_="domainMyTasksContainer") is not None
 
 
 # =====================================================

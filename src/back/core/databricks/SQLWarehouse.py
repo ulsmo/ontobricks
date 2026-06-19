@@ -23,39 +23,6 @@ logger = get_logger(__name__)
 _POOL_MAX_SIZE = 8
 _POOL_MAX_IDLE_SECS = 300
 
-try:  # databricks-sql-connector connection-level exception types
-    from databricks.sql import exc as _dbsql_exc
-
-    _CONN_ERROR_TYPES: Tuple[type, ...] = (
-        _dbsql_exc.OperationalError,
-        _dbsql_exc.InterfaceError,
-        _dbsql_exc.RequestError,
-        _dbsql_exc.SessionAlreadyClosedError,
-        _dbsql_exc.CursorAlreadyClosedError,
-        _dbsql_exc.NonRecoverableNetworkError,
-    )
-except Exception:  # noqa: BLE001 - older/newer connector layouts
-    _CONN_ERROR_TYPES = ()
-
-
-def _is_connection_error(exc: BaseException) -> bool:
-    """True when *exc* looks like a dead/stale connection worth one retry.
-
-    Covers the connector's connection-level exception types plus the
-    specific ``'NoneType' object has no attribute 'request'`` AttributeError
-    seen when a pooled connection whose HTTP transport was already closed
-    (server-side session drop / warehouse auto-stop) is reused.
-    """
-    if _CONN_ERROR_TYPES and isinstance(exc, _CONN_ERROR_TYPES):
-        return True
-    msg = str(exc).lower()
-    if isinstance(exc, AttributeError) and "request" in msg:
-        return True
-    return any(
-        token in msg
-        for token in ("connection", "session", "closed", "broken pipe", "transport")
-    )
-
 
 class _PooledConnection:
     """Wrapper that tracks creation time around a raw DB-API connection."""
@@ -98,12 +65,14 @@ class SQLWarehouse:
         params = self._auth.get_sql_connection_params()
         return sql.connect(**params)
 
-    def _checkout(self) -> Tuple[_PooledConnection, bool]:
-        """Get a pooled connection (``reused=True``) or a fresh one.
+    @contextmanager
+    def _borrow(self):
+        """Borrow a connection from the pool; return it when done.
 
         Stale connections (older than ``_POOL_MAX_IDLE_SECS``) are discarded
-        and a fresh one is created. Reuse is reported so callers can decide
-        whether a failure is worth retrying on a fresh connection.
+        and a fresh one is created.  If the borrowed connection turns out to
+        be broken the caller should **not** return it (the ``except`` branch
+        takes care of that).
         """
         conn: Optional[_PooledConnection] = None
         try:
@@ -115,70 +84,18 @@ class SQLWarehouse:
             conn = None
 
         if conn is None:
-            return _PooledConnection(self._new_connection()), False
-        return conn, True
+            conn = _PooledConnection(self._new_connection())
 
-    def _checkin(self, conn: _PooledConnection) -> None:
-        """Return *conn* to the pool, or close it if the pool is full."""
-        try:
-            self._pool.put_nowait(conn)
-        except queue.Full:
-            self._close_quietly(conn)
-
-    @contextmanager
-    def _borrow(self):
-        """Borrow a connection from the pool; return it when done.
-
-        Stale connections (older than ``_POOL_MAX_IDLE_SECS``) are discarded
-        and a fresh one is created.  If the borrowed connection turns out to
-        be broken the caller should **not** return it (the ``except`` branch
-        takes care of that).
-        """
-        conn, _reused = self._checkout()
         try:
             yield conn.conn
         except Exception:
             self._close_quietly(conn)
             raise
         else:
-            self._checkin(conn)
-
-    def _run(self, fn):
-        """Run ``fn(conn)`` on a pooled connection with one retry.
-
-        A long-running build can span a server-side session drop (warehouse
-        auto-stop/scale, idle disconnect); the stale pooled connection then
-        surfaces as a connection error (e.g. the ``unified_http_client`` None
-        ``request`` AttributeError). When that happens on a *reused*
-        connection we discard it and retry once on a fresh connection so the
-        build doesn't crash on a recoverable transport teardown.
-
-        ``fn`` must fully consume its work before returning (no lazy
-        generators) so a retry re-runs the whole operation cleanly.
-        """
-        conn, reused = self._checkout()
-        try:
-            result = fn(conn.conn)
-        except Exception as exc:
-            self._close_quietly(conn)
-            if reused and _is_connection_error(exc):
-                logger.warning(
-                    "Stale pooled connection (%s); retrying once on a fresh "
-                    "connection",
-                    exc,
-                )
-                fresh = _PooledConnection(self._new_connection())
-                try:
-                    result = fn(fresh.conn)
-                except Exception:
-                    self._close_quietly(fresh)
-                    raise
-                self._checkin(fresh)
-                return result
-            raise
-        else:
-            self._checkin(conn)
-            return result
+            try:
+                self._pool.put_nowait(conn)
+            except queue.Full:
+                self._close_quietly(conn)
 
     @staticmethod
     def _close_quietly(pc: _PooledConnection) -> None:
@@ -202,12 +119,10 @@ class SQLWarehouse:
             return False, "Missing configuration: DATABRICKS_HOST or DATABRICKS_TOKEN"
 
         try:
-            def _probe(conn):
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT 1")
                     cur.fetchone()
-
-            self._run(_probe)
             auth_mode = (
                 "OAuth (Databricks App)"
                 if self._auth.is_app_mode
@@ -220,15 +135,12 @@ class SQLWarehouse:
     def execute_query(self, query: str) -> List[Dict[str, Any]]:
         """Execute *query* and return rows as a list of dicts."""
         self._require_warehouse()
-
-        def _fetch(conn):
-            with conn.cursor() as cur:
-                cur.execute(query)
-                columns = [desc[0] for desc in cur.description]
-                return [dict(zip(columns, row)) for row in cur.fetchall()]
-
         try:
-            return self._run(_fetch)
+            with self._borrow() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query)
+                    columns = [desc[0] for desc in cur.description]
+                    return [dict(zip(columns, row)) for row in cur.fetchall()]
         except Exception as exc:
             logger.exception("Error executing query: %s", exc)
             raise
@@ -268,25 +180,22 @@ class SQLWarehouse:
     def execute_statement(self, statement: str) -> bool:
         """Execute a DDL/DML *statement* without returning results."""
         self._require_warehouse()
-
-        def _exec(conn):
-            with conn.cursor() as cur:
-                cur.execute(statement)
-            # UC DDL must be committed before control-plane APIs (e.g. synced
-            # database tables) can resolve catalog.schema in the metastore.
-            commit = getattr(conn, "commit", None)
-            if callable(commit):
-                try:
-                    commit()
-                except Exception as commit_exc:  # noqa: BLE001
-                    logger.debug(
-                        "Ignoring commit() after DDL (autocommit driver): %s",
-                        commit_exc,
-                    )
-            return True
-
         try:
-            return self._run(_exec)
+            with self._borrow() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(statement)
+                # UC DDL must be committed before control-plane APIs (e.g. synced
+                # database tables) can resolve catalog.schema in the metastore.
+                commit = getattr(conn, "commit", None)
+                if callable(commit):
+                    try:
+                        commit()
+                    except Exception as commit_exc:  # noqa: BLE001
+                        logger.debug(
+                            "Ignoring commit() after DDL (autocommit driver): %s",
+                            commit_exc,
+                        )
+            return True
         except Exception as exc:
             logger.exception("Error executing statement: %s", exc)
             raise

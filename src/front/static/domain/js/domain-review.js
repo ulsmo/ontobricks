@@ -89,13 +89,10 @@
     function statusBanner(d) {
         const buttons = actionButtons(d);
         const notes = actionNotes(d);
-        const discussBtn =
-            '<button type="button" class="btn btn-sm btn-outline-secondary" ' +
-            'data-review-discuss="1" title="Open the domain discussion">' +
-            '<i class="bi bi-chat-dots me-1"></i>Discussion</button>';
-        const right =
-            '<div class="review-actions d-flex flex-wrap gap-2 justify-content-end">' +
-            buttons.join('') + discussBtn + '</div>';
+        const right = buttons.length
+            ? '<div class="review-actions d-flex flex-wrap gap-2 justify-content-end">' +
+              buttons.join('') + '</div>'
+            : '';
         const notesHtml = notes.length
             ? '<div class="review-banner-notes d-flex flex-column gap-2 mt-2">' +
               notes.join('') + '</div>'
@@ -472,15 +469,6 @@
         document.querySelectorAll('[data-review-action]').forEach((b) => {
             b.addEventListener('click', () => onAction(b.dataset.reviewAction));
         });
-        document.querySelector('[data-review-discuss]')?.addEventListener(
-            'click', () => {
-                if (!window.OntoComments) return;
-                OntoComments.openThread({
-                    folder: state.folder,
-                    version: state.version,
-                });
-            }
-        );
     }
 
     async function onAction(action) {

@@ -154,45 +154,6 @@ class TestSaveMappingConfig:
         assert domain.assignment["entities"] == []
 
 
-class TestApplyAgentMappings:
-    def test_adds_and_persists(self):
-        domain = _mock_domain()
-        counts = Mapping(domain).apply_agent_mappings(
-            [{"ontology_class": "http://t/A", "id_column": "id"}],
-            [{"property": "http://t/p"}],
-        )
-        assert counts == {"entities": 1, "relationships": 1}
-        assert domain.assignment["entities"][0]["id_column"] == "id"
-        domain.save.assert_called_once()
-
-    def test_upserts_by_uri(self):
-        domain = _mock_domain(
-            entities=[{"ontology_class": "http://t/A", "id_column": "old"}]
-        )
-        Mapping(domain).apply_agent_mappings(
-            [{"ontology_class": "http://t/A", "id_column": "new"}], []
-        )
-        assert len(domain.assignment["entities"]) == 1
-        assert domain.assignment["entities"][0]["id_column"] == "new"
-
-    def test_preserves_existing_excluded_flag(self):
-        # An entity the user excluded must stay excluded after a re-map even if
-        # the agent proposes a fresh mapping for it.
-        domain = _mock_domain(
-            entities=[{"ontology_class": "http://t/A", "excluded": True}]
-        )
-        Mapping(domain).apply_agent_mappings(
-            [{"ontology_class": "http://t/A", "id_column": "id"}], []
-        )
-        assert domain.assignment["entities"][0]["excluded"] is True
-
-    def test_handles_none_payloads(self):
-        domain = _mock_domain(entities=[{"ontology_class": "http://t/A"}])
-        counts = Mapping(domain).apply_agent_mappings(None, None)
-        assert counts == {"entities": 1, "relationships": 0}
-        domain.save.assert_called_once()
-
-
 class TestExtractFqnFromSql:
     def test_simple_from(self):
         triples = Mapping._extract_fqn_from_sql(

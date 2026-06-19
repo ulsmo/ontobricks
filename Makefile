@@ -11,7 +11,7 @@
 
 CONFIG := scripts/deploy.config.sh
 
-.PHONY: help install test test-cov test-e2e run dev prod setup format lint clean \
+.PHONY: help install test test-cov run dev prod setup format lint clean \
         deploy deploy-dry-run deploy-volume deploy-no-run \
         bootstrap-perms bootstrap-lakebase \
         bundle-validate bundle-summary deploy-check \
@@ -27,9 +27,8 @@ help:
 	@echo "    make setup        - Complete setup (install + configure)"
 	@echo ""
 	@echo "  Testing:"
-	@echo "    make test         - Run the PR gate (excludes e2e/property/eval/external)"
-	@echo "    make test-cov     - Run the PR gate with coverage"
-	@echo "    make test-e2e     - Run the Playwright e2e suite (isolated process)"
+	@echo "    make test         - Run tests"
+	@echo "    make test-cov     - Run tests with coverage"
 	@echo ""
 	@echo "  Code Quality:"
 	@echo "    make format       - Format code with black"
@@ -65,25 +64,13 @@ run:
 	@echo "Starting OntoBricks (FastAPI)..."
 	. .venv/bin/activate && python run.py
 
-# Mirror the CI "G1 unit+integration" gate (.github/workflows/ci.yml).
-# The Playwright e2e suite uses the sync API, whose session-scoped event
-# loop is incompatible with pytest-asyncio when run in the same process —
-# so e2e runs in its own process via `make test-e2e` (and CI runs it as a
-# separate nightly job). property/eval/external are likewise out-of-band.
-PYTEST_GATE := --ignore=tests/e2e -m "not e2e and not property and not eval and not external"
-
 test:
-	@echo "Running tests (PR gate; e2e excluded — use 'make test-e2e')..."
-	. .venv/bin/activate && pytest tests/ $(PYTEST_GATE)
+	@echo "Running tests..."
+	. .venv/bin/activate && pytest
 
 test-cov:
-	@echo "Running tests with coverage (PR gate)..."
-	. .venv/bin/activate && pytest tests/ $(PYTEST_GATE) \
-		--cov=src --cov-report=html --cov-report=term
-
-test-e2e:
-	@echo "Running Playwright e2e suite (isolated process)..."
-	. .venv/bin/activate && pytest tests/e2e/
+	@echo "Running tests with coverage..."
+	. .venv/bin/activate && pytest --cov=src --cov-report=html --cov-report=term
 
 format:
 	@echo "Formatting code..."
