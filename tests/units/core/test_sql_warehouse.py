@@ -7,7 +7,7 @@ from unittest.mock import Mock, MagicMock, patch
 _databricks_auth_mod = importlib.import_module("back.core.databricks.DatabricksAuth")
 
 from back.core.databricks.DatabricksAuth import DatabricksAuth
-from back.core.databricks.SQLWarehouse import SQLWarehouse
+from back.core.databricks.SQLWarehouse import SQLWarehouse, _is_connection_error
 from back.core.errors import ValidationError
 
 
@@ -325,6 +325,94 @@ class TestCreateOrReplaceTableFromQuery:
         assert ok is False
         assert "Failed to create table" in msg
         assert "ctas failed" in msg
+
+
+class TestIsConnectionError:
+    def test_nonetype_request_attribute_error_is_connection(self):
+        # The exact signature seen when a pooled connection whose HTTP
+        # transport was already closed is reused.
+        exc = AttributeError("'NoneType' object has no attribute 'request'")
+        assert _is_connection_error(exc) is True
+
+    def test_connection_keyword_message_is_connection(self):
+        assert _is_connection_error(RuntimeError("connection reset by peer")) is True
+
+    def test_session_closed_message_is_connection(self):
+        assert _is_connection_error(RuntimeError("session already closed")) is True
+
+    def test_unrelated_error_is_not_connection(self):
+        assert _is_connection_error(ValueError("invalid literal for int()")) is False
+
+
+class TestPoolRetry:
+    """A long build can span a server-side session drop; a stale pooled
+    connection then surfaces as a connection error. ``_run`` discards it and
+    retries once on a fresh connection so the build doesn't crash."""
+
+    def _auth(self):
+        return DatabricksAuth(
+            host="https://h.databricks.com",
+            token="tok",
+            warehouse_id="wh-1",
+        )
+
+    @patch("databricks.sql.connect")
+    def test_execute_query_retries_on_dead_pooled_connection(
+        self, mock_connect, monkeypatch
+    ):
+        monkeypatch.delenv("DATABRICKS_APP_PORT", raising=False)
+        conn1, cur1 = _make_connect_mock(
+            description=[("cnt",)], fetchall_rows=[(5,)]
+        )
+        conn2, _ = _make_connect_mock(
+            description=[("cnt",)], fetchall_rows=[(9,)]
+        )
+        mock_connect.side_effect = [conn1, conn2]
+
+        sw = SQLWarehouse(self._auth())
+        # Prime the pool with conn1.
+        assert sw.execute_query("SELECT count(*) AS cnt FROM v") == [{"cnt": 5}]
+        # conn1 is now pooled; make it dead on its next use.
+        cur1.execute.side_effect = AttributeError(
+            "'NoneType' object has no attribute 'request'"
+        )
+        rows = sw.execute_query("SELECT count(*) AS cnt FROM v")
+        assert rows == [{"cnt": 9}]
+        assert mock_connect.call_count == 2
+
+    @patch("databricks.sql.connect")
+    def test_no_retry_when_fresh_connection_fails(self, mock_connect, monkeypatch):
+        monkeypatch.delenv("DATABRICKS_APP_PORT", raising=False)
+        conn1, cur1 = _make_connect_mock(
+            description=[("cnt",)], fetchall_rows=[(5,)]
+        )
+        cur1.execute.side_effect = AttributeError(
+            "'NoneType' object has no attribute 'request'"
+        )
+        mock_connect.side_effect = [conn1]
+
+        sw = SQLWarehouse(self._auth())
+        with pytest.raises(AttributeError):
+            sw.execute_query("SELECT 1")
+        # Fresh connection failures are real; no retry.
+        assert mock_connect.call_count == 1
+
+    @patch("databricks.sql.connect")
+    def test_no_retry_on_non_connection_error(self, mock_connect, monkeypatch):
+        monkeypatch.delenv("DATABRICKS_APP_PORT", raising=False)
+        conn1, cur1 = _make_connect_mock(
+            description=[("cnt",)], fetchall_rows=[(5,)]
+        )
+        mock_connect.side_effect = [conn1]
+
+        sw = SQLWarehouse(self._auth())
+        # Prime the pool with conn1.
+        assert sw.execute_query("SELECT count(*) AS cnt FROM v") == [{"cnt": 5}]
+        # A genuine SQL error on the reused connection is not retried.
+        cur1.execute.side_effect = ValueError("bad SQL syntax near token")
+        with pytest.raises(ValueError):
+            sw.execute_query("SELECT bad")
+        assert mock_connect.call_count == 1
 
 
 class TestGetWarehouses:

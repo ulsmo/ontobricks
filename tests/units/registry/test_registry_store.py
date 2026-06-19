@@ -127,6 +127,15 @@ class _InMemoryStore(RegistryStore):
         data.setdefault("info", {})["status"] = status
         return True, "ok"
 
+    def update_last_build(
+        self, folder: str, version: str, ts: str
+    ) -> Tuple[bool, str]:
+        data = self._versions.get((folder, version))
+        if data is None:
+            return False, f"missing {folder}/{version}"
+        data.setdefault("info", {})["last_build"] = ts
+        return True, "ok"
+
     def load_domain_permissions(self, folder: str) -> Dict[str, Any]:
         return dict(self._perms.get(folder, {"version": 1, "permissions": []}))
 
@@ -378,6 +387,19 @@ class TestStoreContract:
 
     def test_update_version_status_unknown_version(self, store):
         ok, msg = store.update_version_status("ghost", "9", "PUBLISHED")
+        assert ok is False
+        assert msg
+
+    def test_update_last_build_round_trip(self, store):
+        store.write_version("demo", "1", {"info": {"name": "demo"}})
+        ok, msg = store.update_last_build("demo", "1", "2026-06-19T09:00:00+00:00")
+        assert ok, msg
+        ok, got, _ = store.read_version("demo", "1")
+        assert ok
+        assert got["info"]["last_build"] == "2026-06-19T09:00:00+00:00"
+
+    def test_update_last_build_unknown_version(self, store):
+        ok, msg = store.update_last_build("ghost", "9", "2026-06-19T09:00:00+00:00")
         assert ok is False
         assert msg
 

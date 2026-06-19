@@ -206,6 +206,15 @@ class RegistryStore(ABC):
         a single (domain, version) without rewriting the full document.
         """
 
+    @abstractmethod
+    def update_last_build(
+        self, folder: str, version: str, ts: str
+    ) -> Tuple[bool, str]:
+        """Stamp the ``last_build`` timestamp of a single (domain, version)
+        without rewriting the full document. Used by every build path so
+        the Submit gate / lifecycle guard see a built version.
+        """
+
     # ------------------------------------------------------------------
     # Domain-level permissions
     # ------------------------------------------------------------------

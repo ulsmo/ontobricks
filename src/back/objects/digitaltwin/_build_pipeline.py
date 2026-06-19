@@ -22,7 +22,11 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from back.core.errors import OntoBricksError, OperationCancelledError
+from back.core.errors import (
+    InfrastructureError,
+    OntoBricksError,
+    OperationCancelledError,
+)
 
 
 def _raise_if_cancelled(cancel_check) -> None:
@@ -294,7 +298,14 @@ class _BuildPipeline:
         return self._is_lakebase_synced
 
     def _count_view_triples(self) -> int:
-        """Return the number of triples in the VIEW (server-side COUNT)."""
+        """Return the number of triples in the VIEW (server-side COUNT).
+
+        A successful COUNT of ``0`` is a genuinely empty view (kept as a
+        non-fatal "no triples" outcome upstream). A *failed* count (view
+        missing, transient/connection error) is raised rather than coerced
+        to ``0`` — otherwise a broken build would be misreported as a
+        healthy zero-triple build and would silently stamp ``last_build``.
+        """
         logger.debug(
             "[DT-BUILD %s] counting triples in VIEW %s", self.task_id, self.view_table
         )
@@ -311,13 +322,15 @@ class _BuildPipeline:
             )
             return count
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
+            logger.error(
                 "[DT-BUILD %s] could not count triples in VIEW %s: %s",
                 self.task_id,
                 self.view_table,
                 exc,
             )
-            return 0
+            raise InfrastructureError(
+                f"Failed to count triples in view {self.view_table}: {exc}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Orchestrator
@@ -1257,6 +1270,69 @@ class _BuildPipeline:
                 exc,
             )
 
+    def _persist_last_build(self, ts: str) -> None:
+        """Stamp ``last_build`` on the registry version record (best-effort).
+
+        The interactive/API build only updated the in-memory session;
+        the Submit gate and lifecycle guard read ``info.last_build`` from
+        the registry. Without this, a healthy build leaves the version
+        looking "never built" and Submit stays blocked. Mirrors the
+        scheduler's stamp but as a surgical single-column update so it
+        never rewrites the full version document.
+        """
+        try:
+            from back.objects.registry.RegistryService import RegistryService
+            from back.objects.session import sanitize_domain_folder
+
+            folder = getattr(self.domain, "uc_domain_folder", "") or (
+                sanitize_domain_folder(self.domain_name)
+            )
+            version = (
+                getattr(self.domain_snap, "current_version", None)
+                or getattr(self.domain, "current_version", None)
+                or ""
+            )
+            if not folder or not version:
+                logger.warning(
+                    "[DT-BUILD %s] cannot stamp last_build "
+                    "(folder=%r version=%r)",
+                    self.task_id,
+                    folder,
+                    version,
+                )
+                return
+            # Keep the in-process session consistent with the registry.
+            try:
+                self.domain.last_build = ts
+            except Exception:  # noqa: BLE001
+                pass
+            svc = RegistryService.from_context(self.domain, self.settings)
+            ok, msg = svc.update_last_build(folder, str(version), ts)
+            if ok:
+                logger.info(
+                    "[DT-BUILD %s] stamped last_build=%s in registry "
+                    "(%s/%s)",
+                    self.task_id,
+                    ts,
+                    folder,
+                    version,
+                )
+            else:
+                logger.error(
+                    "[DT-BUILD %s] update_last_build failed (%s/%s): %s",
+                    self.task_id,
+                    folder,
+                    version,
+                    msg,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[DT-BUILD %s] could not stamp last_build "
+                "(non-fatal): %s",
+                self.task_id,
+                exc,
+            )
+
     def _complete_task(self) -> None:
         duration = time.time() - self.start_time
         logger.info(
@@ -1284,6 +1360,7 @@ class _BuildPipeline:
         msg = f"Full rebuild: {self.triple_count} triples in {duration:.1f}s"
         self.tm.complete_task(self.task_id, result=result_data, message=msg)
         self._record_build_run("success", message=msg)
+        self._persist_last_build(datetime.now(timezone.utc).isoformat())
 
     def _fail_unexpected(self, exc: Exception) -> None:
         duration = time.time() - self.start_time

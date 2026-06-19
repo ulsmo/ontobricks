@@ -1025,6 +1025,43 @@ class LakebaseRegistryStore(RegistryStore):
             )
             return False, str(exc)
 
+    def update_last_build(
+        self, folder: str, version: str, ts: str
+    ) -> Tuple[bool, str]:
+        """Stamp the ``last_build`` timestamp of a single (domain, version).
+
+        Targeted single-row UPDATE so a build never rewrites the full
+        version document (avoids clobbering concurrent session edits).
+        Also mirrors ``last_build`` into the version ``info`` blob so
+        cached reads stay consistent.
+        """
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {self._q(self._schema)}.domain_versions v
+                    SET last_build = %s,
+                        info = jsonb_set(v.info, '{{last_build}}', to_jsonb(%s::text)),
+                        updated_at = now()
+                    FROM {self._q(self._schema)}.domains d
+                    WHERE v.domain_id = d.id
+                      AND d.registry_id = %s AND d.folder = %s
+                      AND v.version = %s
+                    """,
+                    (ts, ts, self._registry(), folder, version),
+                )
+                if cur.rowcount == 0:
+                    return False, (
+                        f"Version {version} not found for domain {folder}"
+                    )
+            invalidate_registry_cache(self.cache_key)
+            return True, ""
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "update_last_build failed for %s/%s", folder, version
+            )
+            return False, str(exc)
+
     # ------------------------------------------------------------------
     # Permissions
     # ------------------------------------------------------------------

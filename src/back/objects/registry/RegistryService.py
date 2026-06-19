@@ -865,6 +865,20 @@ class RegistryService:
             invalidate_registry_cache(self.cache_key)
         return ok, msg
 
+    def update_last_build(
+        self, folder: str, version: str, ts: str
+    ) -> Tuple[bool, str]:
+        """Stamp ``last_build`` for a single (domain, version).
+
+        Targeted single-column update used by every build path so the
+        Submit gate / lifecycle guard see a built version. Invalidates the
+        registry cache so the Validation page reflects it immediately.
+        """
+        ok, msg = self._store.update_last_build(folder, version, ts)
+        if ok:
+            invalidate_registry_cache(self.cache_key)
+        return ok, msg
+
     # -- review / validation audit log -------------------------------
 
     def record_review_event(

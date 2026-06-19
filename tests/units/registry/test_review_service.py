@@ -7,6 +7,7 @@ caches) are mocked; the focus is the workflow rules and side effects.
 """
 
 import importlib
+from types import SimpleNamespace
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -18,6 +19,8 @@ from back.core.errors import (
     NotFoundError,
     ValidationError,
 )
+from back.objects.digitaltwin._build_pipeline import _BuildPipeline
+from back.objects.registry.RegistryService import RegistryService
 from back.objects.registry.PermissionService import (
     ROLE_ADMIN,
     ROLE_BUILDER,
@@ -138,6 +141,76 @@ def test_submit_wrong_status_conflicts():
     with pytest.raises(ConflictError):
         _call("submit", svc, comment="", user_role=ROLE_ADMIN,
               user_domain_role=ROLE_NONE)
+
+
+def _build_pipeline_for(folder, version):
+    """A `_BuildPipeline` whose `_persist_last_build` derives *folder* and
+    *version* the same way the real interactive/API build does."""
+    domain = SimpleNamespace(
+        info={"name": folder},
+        uc_domain_folder=folder,
+        current_version=version,
+        last_build="",
+    )
+    return _BuildPipeline(
+        tm=MagicMock(),
+        task_id="task-fix",
+        domain=domain,
+        settings={},
+        domain_snap=SimpleNamespace(current_version=version),
+        host="host",
+        token="token",
+        warehouse_id="wh-1",
+        view_table="cat.schema.view",
+        graph_name="g1",
+        r2rml_content="",
+        base_uri="http://ex/",
+        mapping_config={},
+        ontology_config={},
+        delta_cfg={},
+        build_kind="session",
+    )
+
+
+def test_interactive_build_unblocks_submit_gate():
+    """Regression for the 0.5.1 fix: an interactive build that stamps
+    `last_build` on the registry flips the Submit gate from blocked to
+    allowed. Before the fix the build never wrote the registry field, so a
+    healthy DRAFT stayed blocked with the "never been built" banner.
+
+    The build's `_persist_last_build` and `ReviewService.review_detail` are
+    wired to the *same* registry service so the stamp the build writes is the
+    field the gate reads."""
+    svc, info, _ = _make_svc(status="DRAFT", last_build="")
+
+    # Gate starts blocked: the version has no recorded build.
+    blocked = _call("review_detail", svc,
+                    user_role="", user_domain_role=ROLE_BUILDER)
+    assert blocked["actions"]["can_submit"] is False
+    assert "never been built" in blocked["actions"]["submit_blocked_reason"]
+
+    # The build stamps last_build via update_last_build -> mutate the shared
+    # registry record (mirrors the real single-column UPDATE).
+    def _stamp(folder, version, ts):
+        info["last_build"] = ts
+        return True, ""
+
+    svc.update_last_build.side_effect = _stamp
+
+    pipe = _build_pipeline_for("acme", "2")
+    with patch.object(RegistryService, "from_context", return_value=svc):
+        pipe._persist_last_build("2026-06-19T10:00:00+00:00")
+
+    svc.update_last_build.assert_called_once_with(
+        "acme", "2", "2026-06-19T10:00:00+00:00"
+    )
+    assert info["last_build"] == "2026-06-19T10:00:00+00:00"
+
+    # Gate now open for the builder.
+    unblocked = _call("review_detail", svc,
+                      user_role="", user_domain_role=ROLE_BUILDER)
+    assert unblocked["actions"]["can_submit"] is True
+    assert unblocked["actions"]["submit_blocked_reason"] == ""
 
 
 # ----------------------------------------------------------------------
