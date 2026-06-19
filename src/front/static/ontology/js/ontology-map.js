@@ -790,6 +790,11 @@ async function initOntologyMap() {
     const autoIconsBtn = document.getElementById('mapAutoAssignIcons');
     if (autoIconsBtn) autoIconsBtn.onclick = () => autoAssignEntityIcons();
 
+    // Discussion button — opens the whole-ontology thread with a picker to
+    // optionally re-tag the comment to a specific entity/relationship.
+    const discussBtn = document.getElementById('mapDiscuss');
+    if (discussBtn) discussBtn.onclick = () => openOntologyDiscussion();
+
     // Reset layout button - clears saved positions and re-runs simulation
     document.getElementById('mapResetLayout')?.addEventListener('click', async () => {
         // Clear fixed positions
@@ -1500,6 +1505,20 @@ const ICONS_TASK_KEY = 'ontobricks_icons_task';
 
 // Module-level guard so the monitor loop is started at most once per task.
 let _iconsCurrentTaskId = null;
+
+/**
+ * Open the ontology designer discussion. Anchors to the whole ontology
+ * diagram (domain/'ontology'); each comment can optionally be tagged with
+ * one or more classes/relationships via the compose-box tag picker.
+ */
+function openOntologyDiscussion() {
+    if (!window.OntoComments) return;
+    const cfg = (typeof OntologyState !== 'undefined' && OntologyState.config) || {};
+    OntoComments.openForSelection(
+        'domain', 'ontology', 'Whole ontology diagram',
+        OntoComments.taggableFromOntology(cfg)
+    );
+}
 
 /**
  * Restore button state (used after completion, failure, or resume).
